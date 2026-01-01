@@ -1,0 +1,11 @@
+generate python proto handlers : 
+
+python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. log_service.proto
+
+
+Generate this virtual "test" venv : 
+
+python -m virtualenv test --python=python3.9
+cd test && cd bin && source activate && cd ..
+
+a previous installation of protobuf and capnp install is needed...

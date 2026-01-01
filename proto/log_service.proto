@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package logservice;
+
+// Level enum - note: protobuf enums start at 0
+enum Level {
+  NOTSET = 0;
+  DEBUG = 1;
+  STREAM = 2;
+  INFO = 3;
+  LOGON = 4;
+  LOGOUT = 5;
+  TRADE = 6;
+  SCHEDULE = 7;
+  REPORT = 8;
+  WARNING = 9;
+  ERROR = 10;
+  CRITICAL = 11;
+}
+
+service LogService {
+    rpc LogMessage(LogRequest) returns (LogResponse);
+}
+
+message LogRequest {
+  // recorded by log_server
+  string timestamp = 1;
+  string hostname = 2;
+  string logger_name = 3;
+  string module = 4;
+  Level level = 5;  // Changed from string to enum
+  string filename = 6;
+  string function_name = 7;
+  string line_number = 8;
+  string message = 9;
+
+  // others
+  
+  // path of the file
+  string path_name = 10;
+  
+  // Process information
+  string process_id = 11;
+  string process_name = 12;
+  
+  // Thread information  
+  string thread_id = 13;
+  string thread_name = 14;
+  
+  // Additional requested fields
+  string service_name = 15;
+
+  // Optional stack trace for errors
+  string stack_trace = 16;
+}
+
+message LogResponse {
+    bool success = 1;
+}

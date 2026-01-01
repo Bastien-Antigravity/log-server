@@ -1,0 +1,134 @@
+
+Data Flow of the log server
+
+- TCP: Binary protocol with length-prefixed messages (capnp)
+- gRPC: HTTP/2 with Protobuf serialization
+- Both protocols feed into the same processing pipeline
+
+
+Server Processing Layers : 
+
+                        *can be enable or not
+┌──────────────────┐    ┌──────────────────┐
+│   TCP Clients    │    │   gRPC Clients   │
+│  ┌─────────────┐ │    │  ┌─────────────┐ │
+│  │ App Layer   │ │    │  │ App Layer   │ │
+│  └──────┬──────┘ │    │  └──────┬──────┘ │
+│  ┌──────▼──────┐ │    │  ┌──────▼──────┐ │
+│  │ TCP Logger  │ │    │  │gRPC Logger  │ │
+│  └──────┬──────┘ │    │  └──────┬──────┘ │
+│  ┌──────▼──────┐ │    │  ┌──────▼──────┐ │
+│  │TCP socket   │ │    │  │ Channel     │ │
+│  │Connection   │ │    │  │   Pool      │ │
+│  └──────┬──────┘ │    │  └──────┬──────┘ │
+└─────────┼────────┘    └─────────┼────────┘
+          │                       │
+          │                       │         
+          │                       │
+    ┌─────│───────────────────────│──────┐
+    │     │   Log Server Core     │      │
+    │  ┌──▼──────────┐ ┌──────────▼──┐   │
+    │  │ TCP Handler │ │ gRPC Handler│   │
+    │  └──────┬──────┘ └──────┬──────┘   │
+    │         │               │          │
+    │  ┌──────▼──────┐ ┌──────▼──────┐   │
+    │  │capnp Parser │ │ proto Parser│   │
+    │  └──────┬──────┘ └──────┬──────┘   │
+    │         └───────┬───────┘          │
+    │                 │                  │
+    │         ┌───────▼───────┐          │
+    │         │  Sequencer    │          │
+    │         │ (AtomicU64)   │          │
+    │         └───────┬───────┘          │
+    └─────────────────┼──────────────────┘
+                      │
+                      | 
+                      |
+                      │
+            ┌─────────▼─────────┐
+            │   File Writer     │
+            │ ┌───────────────┐ │
+            │ │ BTreeMap<u64, │ │  ← Orders by sequence number
+            │ │    String>    │ │
+            │ └───────┬───────┘ │
+            │         │         │
+            │ ┌───────▼───────┐ │
+            │ │ Batch Writer  │ │  ← Dynamic batching
+            │ └───────┬───────┘ │
+            │         │         │
+            │ ┌───────▼───────┐ │
+            │ │ Retry Logic   │ │  ← 3 retries with delays
+            │ └───────┬───────┘ │
+            └─────────┼─────────┘
+                      │
+                      |
+                      |
+                      │
+            ┌─────────▼─────────┐
+            │   File System     │
+            │ ┌───────────────┐ │
+            │ │ _main.log     │ │  ← Current active file
+            │ └───────────────┘ │
+            │ ┌───────────────┐ │
+            │ │ _main.log.0   │ │  ← Rotated files
+            │ └───────────────┘ │
+            │ ┌───────────────┐ │
+            │ │ _main.log.1   │ │
+            │ └───────────────┘ │
+            │       ...         │
+            └───────────────────┘
+
+
+
+
+Key Design Strengths
+
+Ordering Guarantee
+
+rust
+// Sequence numbers ensure order across all clients
+let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
+// Results in: "12345 timestamp hostname logger_name level ..."
+Protocol Agnostic
+
+TCP: Cap'n Proto → format!() → Ordered queue
+gRPC: Protobuf → format!() → Ordered queue
+Same processing path after message parsing
+Efficient Batching
+
+rust
+// Dynamic batch sizing
+if buffer.len() > batch_size {
+    batch_size = (batch_size * 2).min(1000);  // Scale up
+} else if buffer.len() < batch_size / 2 {
+    batch_size = (batch_size / 2).max(10);    // Scale down
+}
+Fault Tolerance
+
+rust
+// Retry logic for disk writes
+for attempt in 0..=config.max_retries {
+    if write_successful { break; }
+    sleep(Duration::from_millis(config.retry_delay_ms)).await;
+}
+
+
+Real-World Example Flow
+
+Scenario: 2 TCP clients + 1 gRPC client sending logs simultaneously
+
+text
+Time    Client      Sequence   Action
+-----   ------      --------   ------
+T=0     TCP-A       #1         "Starting process"
+T=1     gRPC-A      #2         "User login"  
+T=2     TCP-B       #3         "Database query"
+T=3     TCP-A       #4         "Processing data"
+T=4     gRPC-A      #5         "User action"
+
+File Output (guaranteed order):
+#1 TCP-A: Starting process
+#2 gRPC-A: User login  
+#3 TCP-B: Database query
+#4 TCP-A: Processing data
+#5 gRPC-A: User action
