@@ -2,6 +2,7 @@
 name = "log_server"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.88"
 
 [dependencies]
 tokio = { version = "1.0", features = ["full"] }
