@@ -1,4 +1,5 @@
-# .dockerignore
+# --- Master Merged .dockerignore (Git + Docker + IDEs + Languages + Env) ---
+
 # Git
 .git
 .github
@@ -10,35 +11,38 @@ Dockerfile
 docker-compose.yml
 docker-compose.*.yml
 
-# Go / Rust
-bin/
-vendor/
-target/
-go.work
-go.work.sum
-__debug_*
-
-# Python / JS / Others
-**/__pycache__
-**/*.py[cod]
-**/*.log
-node_modules/
-dist/
-build/
-.venv/
-venv/
+# IDEs / OS
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
 
 # Environment / Secrets
 .env
 .env.*
 secrets/
 
-# OS / IDEs
-.DS_Store
-.vscode/
-.idea/
-*.swp
-*.swo
+# Go
+bin/
+vendor/
+go.work
+go.work.sum
+__debug_*
+
+# Python / JS / Rust / Others
+**/__pycache__
+**/*.py[cod]
+**/*.log
+node_modules/
+dist/
+build/
+target/
+.venv/
+venv/
+mock_output.txt
 
 # Project Docs
 README.md
@@ -51,3 +55,4 @@ ARCHITECTURE.md
 *.numbers
 *.csv
 config_store.json
+zzz_memo

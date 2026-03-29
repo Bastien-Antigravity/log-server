@@ -1,4 +1,4 @@
-# --- Master Merged .gitignore (Global + Go + Python + Rust) ---
+# --- Master Merged .gitignore (Global + Go + Python + Rust + IDEs) ---
 
 # Global / OS
 .DS_Store
@@ -60,7 +60,7 @@ wheels/
 htmlcov/
 
 # Go
-/bin/
+bin/
 /main
 /test
 /test_app
@@ -79,3 +79,4 @@ config_store.json
 Recommendations.txt
 todo.txt
 ARCHITECTURE.md.bak
+zzz_memo
