@@ -1,15 +1,53 @@
-target/
-**/*.rs.bk
-Cargo.lock
+# .dockerignore
+# Git
 .git
+.github
 .gitignore
-.DS_Store
-.vscode
-.idea
-Dockerfile
 .dockerignore
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+
+# Go / Rust
+bin/
+vendor/
+target/
+go.work
+go.work.sum
+__debug_*
+
+# Python / JS / Others
+**/__pycache__
+**/*.py[cod]
+**/*.log
+node_modules/
+dist/
+build/
+.venv/
+venv/
+
+# Environment / Secrets
+.env
+.env.*
+secrets/
+
+# OS / IDEs
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Project Docs
 README.md
+doc/
+docs/
 ARCHITECTURE.md
-capnp/
-proto/
-src/
+*.pdf
+*.txt
+*.xlsx
+*.numbers
+*.csv
+config_store.json

@@ -1,0 +1,12 @@
+services:
+  log-server:
+    build: .
+    image: log-server:latest
+    container_name: log-server
+    restart: unless-stopped
+    ports:
+      - "9020:9020"
+networks:
+  default:
+    name: teleremote_network
+    external: true
