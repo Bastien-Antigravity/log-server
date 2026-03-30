@@ -9,7 +9,7 @@ A high-performance, centralized logging server written in Rust that handles both
 - **Automatic File Rotation**: Rotates log files based on size with configurable backup count
 - **Async Architecture**: Built on Tokio for high-performance concurrent operations
 - **Dynamic Batching**: Automatically adjusts batch sizes based on message volume
-- **Retry Logic**: Implements retry mechanisms for robust write operations
+- **Retry Logic**: Implements retry mechanisms for robust write operations.
 - **Optional gRPC Support**: Runs in TCP-only mode by default; gRPC can be enabled via flag
 
 ## Architecture

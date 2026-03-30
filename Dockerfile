@@ -1,5 +1,5 @@
 # === BUILD STAGE ===
-FROM rust:1.85-alpine AS builder
+FROM rust:1.88-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache musl-dev capnproto protobuf-dev
