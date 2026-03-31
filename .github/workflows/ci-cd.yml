@@ -19,7 +19,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
-      - run: sudo apt-get install -y capnproto
+      - run: sudo apt-get install -y protobuf-compiler capnproto
       - run: cargo test
 
   build-push:
