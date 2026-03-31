@@ -34,8 +34,5 @@ COPY --from=builder /log-server/target/release/log_server /log-server/log-server
 # Make binary executable
 RUN chmod +x /log-server/log-server
 
-# Document the port (optional but recommended)
-EXPOSE 9020
-
 # Set the entrypoint
 ENTRYPOINT ["/log-server/log-server"]
