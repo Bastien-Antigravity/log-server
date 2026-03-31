@@ -50,7 +50,6 @@ fn main() {
 }
 
 //-----------------------------------------------------------------------------------------------
-
 /// Main server execution function
 fn run_server(name: &str, host: &str, port: u16, grpc_port: u16, enable_grpc: bool) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
