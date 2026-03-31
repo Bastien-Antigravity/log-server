@@ -13,7 +13,7 @@ use log_server::core::servers::LogServer;
 //================================================================
 fn main() {
 
-    let matches = Command::new("log_server")
+    let matches = Command::new("log-server")
         .arg(Arg::new("name")
             .long("name")
             .default_value("LogServer"))

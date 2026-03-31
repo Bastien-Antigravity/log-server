@@ -15,7 +15,7 @@ A high-performance, centralized logging server written in Rust that handles both
 ## Architecture
 
 ```
-log_server/
+log-server/
 ├── core/
 │   ├── servers.rs      # Main server orchestrator
 │   ├── handlers.rs     # Message processing and formatting
@@ -53,13 +53,13 @@ cargo build --release
 
 ```bash
 # Start server with default settings
-./log_server
+./log-server
 
 # Start with custom configuration
-./log_server --name MyLogServer --host 0.0.0.0 --port 9020 --grpc_port 9021
+./log-server --name MyLogServer --host 0.0.0.0 --port 9020 --grpc_port 9021
 
 # Start with gRPC enabled
-./log_server --enable_grpc
+./log-server --enable_grpc
 ```
 
 ### Command-Line Options

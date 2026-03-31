@@ -36,7 +36,7 @@ enum Level {
 }
 
 struct LoggerMsg {
-  # // recorded by log_server : 
+  # // recorded by log-server : 
   timestamp @0 :Text;
   hostname @1 :Text;
   loggerName @2 :Text;

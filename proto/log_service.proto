@@ -23,7 +23,7 @@ service LogService {
 }
 
 message LogRequest {
-  // recorded by log_server
+  // recorded by log-server
   string timestamp = 1;
   string hostname = 2;
   string logger_name = 3;
