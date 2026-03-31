@@ -16,35 +16,62 @@ A high-performance, centralized logging server written in Rust that handles both
 
 ```
 log-server/
-├── core/
-│   ├── servers.rs      # Main server orchestrator
-│   ├── handlers.rs     # Message processing and formatting
-│   └── writers.rs      # File writer with ordering and rotation
-├── network/
-│   ├── tcp_server.rs   # TCP socket server (Cap'n Proto)
-│   └── grpc_server.rs  # gRPC server implementation
-├── common/
-│   ├── config.rs       # Server configuration
-│   └── safe_socket.rs  # Safe TCP socket wrapper with framing
-├── logger_capnp/
-│   └── logger_msg.rs   # Generated Cap'n Proto message schema
-├── utils/
-│   └── helpers.rs      # Utility functions
-└── main.rs             # Entry point
+├── src/
+│   ├── core/           # Core business logic (handlers, writers, orchestration)
+│   │   ├── servers.rs  # Main server orchestrator
+│   │   ├── handlers.rs # Message processing and formatting
+│   │   └── writers.rs  # File writer with ordering and rotation
+│   ├── network/        # Network protocol implementations
+│   │   ├── tcp_server.rs  # TCP socket server (Cap'n Proto)
+│   │   └── grpc_server.rs # gRPC server implementation
+│   ├── common/         # Shared utilities and configuration
+│   │   ├── config.rs   # Server configuration
+│   │   └── safe_socket.rs # Safe TCP socket wrapper with framing
+│   ├── logger_capnp/   # Generated Cap'n Proto code
+│   ├── utils/
+│   │   └── helpers.rs  # Utility functions
+│   ├── main.rs         # Entry point
+│   └── lib.rs          # Library root
+├── capnp/
+│   └── logger.capnp    # Cap'n Proto schema
+├── proto/
+│   └── log_service.proto # gRPC proto definition
+├── Dockerfile          # Container definition
+└── docker-compose.yml  # Multi-container orchestration
 ```
 
 ## Installation
 
 ### Prerequisites
 
-- Rust 1.70 or higher
-- Protocol Buffers compiler (for gRPC)
-- Cap'n Proto compiler (for TCP messages)
+- Rust 1.88 or higher
+- Protocol Buffers compiler (`protoc`)
+- Cap'n Proto compiler (`capnp`)
 
 ### Build
 
 ```bash
 cargo build --release
+```
+
+### Docker Usage
+
+You can also run the Log Server using Docker or Docker Compose.
+
+#### Docker Compose (Recommended)
+
+```bash
+docker compose up -d
+```
+
+#### Docker Build & Run
+
+```bash
+# Build the image
+docker build -t log-server .
+
+# Run the container
+docker run -d -p 9020:9020 -v $(pwd)/logs:/log-server/logs log-server
 ```
 
 ## Usage
@@ -64,13 +91,13 @@ cargo build --release
 
 ### Command-Line Options
 
-| Option          | Default     | Description                            |
-|-----------------|-------------|----------------------------------------|
-| `--name`        | `LogServer` | Server instance name                   |
-| `--host`        | `127.0.0.1` | Host address to bind to                |
-| `--port`        | `9020`      | TCP server port                        |
-| `--grpc_port`   | `9021`      | gRPC server port                       |
-| `--enable_grpc` | `false`     | Enable gRPC server (default: TCP only) |
+| Option          | Default      | Description                            |
+|-----------------|--------------|----------------------------------------|
+| `--name`        | `log-server` | Server instance name                   |
+| `--host`        | `127.0.0.1`  | Host address to bind to                |
+| `--port`        | `9020`       | TCP server port                        |
+| `--grpc_port`   | `9021`       | gRPC server port                       |
+| `--enable_grpc` | `false`      | Enable gRPC server (default: TCP only) |
 
 ## Message Format
 
@@ -116,11 +143,52 @@ enum Level {
 
 ### gRPC Protocol
 
-The gRPC server uses the `logservice.proto` definition with a `LogMessage` RPC.
+The gRPC server uses the `proto/log_service.proto` definition.
+
+```protobuf
+service LogService {
+  rpc LogMessage(LogRequest) returns (LogResponse);
+}
+
+message LogRequest {
+  string timestamp = 1;
+  string hostname = 2;
+  string logger_name = 3;
+  string module = 4;
+  Level level = 5;
+  string filename = 6;
+  string function_name = 7;
+  string line_number = 8;
+  string message = 9;
+  string path_name = 10;
+  string process_id = 11;
+  string process_name = 12;
+  string thread_id = 13;
+  string thread_name = 14;
+  string service_name = 15;
+  string stack_trace = 16;
+}
+
+enum Level {
+  NOTSET = 0;
+  DEBUG = 1;
+  STREAM = 2;
+  INFO = 3;
+  LOGON = 4;
+  LOGOUT = 5;
+  TRADE = 6;
+  SCHEDULE = 7;
+  REPORT = 8;
+  WARNING = 9;
+  ERROR = 10;
+  CRITICAL = 11;
+}
+```
+
 
 ### Output Format
 
-Log messages are formatted as fixed-width columns:
+Log messages are formatted with fixed-width columns for readability:
 
 ```
 <sequence> <timestamp> <hostname> <logger_name> <level> <filename> <function_name> <line_number> <message>
@@ -128,25 +196,23 @@ Log messages are formatted as fixed-width columns:
 
 Example:
 ```
-0 2025-01-15T10:30:45.123Z myhost app_logger INFO main.py process_data 42 Processing started
+0 2025-01-15T10:30:45.123Z  myhost       app_logger      INFO     main.py              process_data              42     Processing started
 ```
 
 ## Configuration
 
 ### Writer Configuration
 
-The log writer can be configured in `writers.rs`:
+The log writer can be configured in `src/core/writers.rs`:
 
-```rust
-pub struct WriterConfig {
-    pub initial_batch_size: usize,    // Initial batch size (default: 100)
-    pub buffer_size: usize,           // Channel buffer size (default: 1024)
-    pub max_retries: usize,           // Write retry attempts (default: 3)
-    pub retry_delay_ms: u64,          // Delay between retries (default: 100ms)
-    pub max_file_bytes: u64,          // Max file size before rotation (default: 1MB)
-    pub backup_count: usize,          // Number of backup files (default: 10)
-}
-```
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `initial_batch_size` | `100` | Initial number of messages per write batch |
+| `buffer_size` | `1024` | Channel buffer size for incoming messages |
+| `max_retries` | `3` | Number of write retry attempts on failure |
+| `retry_delay_ms` | `100` | Delay between retries in milliseconds |
+| `max_file_bytes` | `1MB` | Maximum file size before rotation |
+| `backup_count` | `10` | Number of rotated backup files to keep |
 
 ### Log File Location
 
@@ -159,65 +225,36 @@ Log files are stored in the `logs/` directory relative to the executable:
 
 ### Message Flow
 
-1. **Reception**: Messages arrive via TCP or gRPC
-2. **Sequencing**: Each message is assigned a sequence number
-3. **Buffering**: Messages are buffered in a BTreeMap ordered by sequence
-4. **Batch Processing**: Messages are written in order once a batch is ready
-5. **File Rotation**: When file size limit is reached, files are rotated
+1. **Reception**: Messages arrive via TCP (Cap'n Proto) or gRPC
+2. **Sequencing**: Each message is assigned a unique sequence number
+3. **Buffering**: Messages are buffered in a `BTreeMap` ordered by sequence number
+4. **Batch Processing**: Messages are written in strict order once a batch is ready or a timeout occurs
+5. **File Rotation**: When the current file exceeds the size limit, it is rotated automatically
 
 ### Ordered Writing
 
-The server ensures messages are written in strict order:
+The server ensures messages are written in strict chronological order based on when they were received:
 
-- Uses sequence numbers to track message order
+- Uses sequence numbers to track the exact arrival order
 - Buffers out-of-order messages until gaps are filled
 - Dynamically adjusts batch size based on buffer depth
-- Guarantees no message reordering in the output file
+- Guarantees no message reordering in the final output file
 
 ### TCP Message Framing
 
-TCP messages use a simple framing protocol:
-- 4-byte big-endian length prefix
-- Variable-length Cap'n Proto packed message
+For TCP (Cap'n Proto), a simple framing protocol is used:
+- **Length Prefix**: 4-byte big-endian unsigned integer (message size)
+- **Payload**: Variable-length Cap'n Proto packed message
 
 ## API
 
-### TCP Client Example
+### TCP (Cap'n Proto) Client
 
-```rust
-// Pseudocode for TCP client
-let mut stream = TcpStream::connect("127.0.0.1:9020").await?;
+Clients should use the `logger.capnp` schema. Messages must be serialized using Cap'n Proto's "packed" format and prefixed with a 4-byte big-endian length.
 
-// Create Cap'n Proto message
-let message = create_log_message(...);
+### gRPC Client
 
-// Serialize with packed format
-let packed = capnp::serialize_packed::write_message_to_words(&message);
-
-// Send length prefix + data
-let len = packed.len() as u32;
-stream.write_all(&len.to_be_bytes()).await?;
-stream.write_all(&packed).await?;
-```
-
-### gRPC Client Example
-
-```protobuf
-service LogService {
-  rpc LogMessage(LogRequest) returns (LogResponse);
-}
-
-message LogRequest {
-  string timestamp = 1;
-  string hostname = 2;
-  string logger_name = 3;
-  int32 level = 4;
-  string filename = 5;
-  string function_name = 6;
-  string line_number = 7;
-  string message = 8;
-}
-```
+Clients can use the `proto/log_service.proto` definition. The service name is `LogService` and the method is `LogMessage`.
 
 ## Performance Characteristics
 
@@ -268,11 +305,11 @@ cargo clippy
 
 ### Project Structure
 
-- `core/`: Core business logic (handlers, writers, orchestration)
-- `network/`: Network protocol implementations (TCP, gRPC)
-- `common/`: Shared utilities and configuration
-- `logger_capnp/`: Generated Cap'n Proto code
-- `utils/`: Helper functions
+- `src/core/`: Core business logic (handlers, writers, orchestration)
+- `src/network/`: Network protocol implementations (TCP, gRPC)
+- `src/common/`: Shared utilities and configuration
+- `src/logger_capnp/`: Generated Cap'n Proto code
+- `src/utils/`: Helper functions
 
 ## Dependencies
 
