@@ -1,8 +1,12 @@
-# --- Infrastructure ---
-log-server:
-  image: ghcr.io/bastien-antigravity/log-server:${TAG:-latest}
-  container_name: log-server
-  restart: unless-stopped
-  ports:
-    - "${LG_IP}:${LG_PORT:-9020}:${LG_PORT:-9020}"
-  labels: [ com.centurylinklabs.watchtower.enable=true ]
+services:
+  # --- Infrastructure ---
+  log-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/bastien-antigravity/log-server:${TAG:-latest}
+    container_name: log-server
+    restart: unless-stopped
+    ports:
+      - "127.0.0.2:${LG_PORT:-9020}:${LG_PORT:-9020}"
+    labels: [ com.centurylinklabs.watchtower.enable=true ]

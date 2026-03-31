@@ -22,9 +22,7 @@ FROM alpine:3.21
 # Install runtime dependencies including protoc
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata \
-    protoc \
-    protobuf-dev
+    tzdata 
 
 WORKDIR /log-server
 
