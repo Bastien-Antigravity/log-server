@@ -16,7 +16,7 @@ fn main() {
     let matches = Command::new("log-server")
         .arg(Arg::new("name")
             .long("name")
-            .default_value("LogServer"))
+            .default_value("log-server"))
         .arg(Arg::new("host")
             .long("host")
             .default_value("127.0.0.1"))

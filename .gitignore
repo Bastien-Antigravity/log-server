@@ -73,6 +73,8 @@ __debug_*
 target/
 **/*.rs.bk
 Cargo.lock
+# artefact by cargo build ?
+/pkg/
 
 # Project Specific
 config_store.json
