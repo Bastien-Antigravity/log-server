@@ -27,9 +27,10 @@ async fn test_full_log_pipeline() {
     }
 
     let name = "test-server";
-    let host = "127.0.0.1";
-    let tcp_port = 9920;
-    let grpc_port = 9921;
+    let host = "0.0.0.0";
+    let client_host = "127.0.0.1";
+    let tcp_port = 12920;
+    let grpc_port = 12921;
 
     // 1. Start the server in a background task
     let server = LogServer::new(name, host, tcp_port, grpc_port, true)
@@ -40,14 +41,14 @@ async fn test_full_log_pipeline() {
         let _ = server.run().await;
     });
 
-    // Wait for server to start
-    sleep(Duration::from_millis(1500)).await;
+    // Wait for server to start - give it enough time to bind ports
+    sleep(Duration::from_millis(3500)).await;
 
     // 2. Send a TCP Cap'n Proto message
-    send_test_tcp_message(host, tcp_port).await;
+    send_test_tcp_message(client_host, tcp_port).await;
 
     // 3. Send a gRPC message
-    send_test_grpc_message(host, grpc_port).await;
+    send_test_grpc_message(client_host, grpc_port).await;
 
     // 4. Wait for messages to be processed and flushed
     sleep(Duration::from_millis(2000)).await;
@@ -101,13 +102,27 @@ async fn send_test_tcp_message(host: &str, port: u16) {
     stream.write_all(&buffer).await.unwrap();
     stream.flush().await.unwrap();
 }
-
 async fn send_test_grpc_message(host: &str, port: u16) {
-    let channel = tonic::transport::Channel::from_shared(format!("http://{}:{}", host, port))
-        .unwrap()
-        .connect()
-        .await
-        .expect("Failed to connect to gRPC server");
+    // Try to connect with retries
+    let mut channel = None;
+    for attempt in 0..5 {
+        match tonic::transport::Channel::from_shared(format!("http://{host}:{port}"))
+            .unwrap()
+            .connect()
+            .await
+        {
+            Ok(c) => {
+                channel = Some(c);
+                break;
+            }
+            Err(_) if attempt < 4 => {
+                sleep(Duration::from_millis(500)).await;
+            }
+            Err(e) => panic!("Failed to connect to gRPC server after retries: {e}"),
+        }
+    }
+
+    let channel = channel.unwrap();
 
     let mut client = LogServiceClient::new(channel);
 

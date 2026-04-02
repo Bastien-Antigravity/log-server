@@ -52,7 +52,12 @@ impl GrpcServer {
         writer_tx: mpsc::Sender<String>,
         sequence_counter: Arc<AtomicU64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("{}:{}", self.config.host, self.config.grpc_port).parse()?;
+        let addr = format!(
+            "{host}:{port}",
+            host = self.config.host,
+            port = self.config.grpc_port
+        )
+        .parse()?;
         let service = GrpcLogServiceImpl::new(&self.config, writer_tx, sequence_counter);
 
         print_internal_log(
@@ -125,7 +130,11 @@ impl LogService for GrpcLogServiceImpl {
                     &self.name,
                     "grpc_server.rs",
                     "105",
-                    &format!("{} - failed to process gRPC message: {}", self.name, e),
+                    &format!(
+                        "{name} - failed to process gRPC message: {e}",
+                        name = self.name,
+                        e = e
+                    ),
                 );
                 Err(Status::internal(format!(
                     "Failed to process log message: {e}"

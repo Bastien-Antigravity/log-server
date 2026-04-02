@@ -38,7 +38,11 @@ impl TcpServer {
         writer_tx: mpsc::Sender<String>,
         sequence_counter: Arc<AtomicU64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("{}:{}", self.config.host, self.config.port);
+        let addr = format!(
+            "{host}:{port}",
+            host = self.config.host,
+            port = self.config.port
+        );
         let listener = TcpListener::bind(&addr).await?;
 
         print_internal_log(
@@ -54,7 +58,7 @@ impl TcpServer {
             let (socket, addr) = listener.accept().await?;
             let writer_tx = writer_tx.clone();
             let sequence_counter = sequence_counter.clone();
-            let client_name = format!("{}_client_{}", self.config.name, addr);
+            let client_name = format!("{name}_client_{addr}", name = self.config.name, addr = addr);
 
             tokio::spawn(async move {
                 if let Err(e) =

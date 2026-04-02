@@ -69,7 +69,7 @@ pub fn format_log_message(
     if meta.is_empty() {
         base
     } else {
-        format!("{} [metadata: {}]", base, meta.join(" "))
+        format!("{base} [metadata: {meta}]", meta = meta.join(" "))
     }
 }
 

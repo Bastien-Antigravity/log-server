@@ -10,6 +10,8 @@ use tokio::sync::mpsc;
 use crate::core::log_formatter::format_log_message;
 use crate::models::log_entry::{LogEntry, LEVEL_STRINGS};
 
+#[allow(clippy::all)]
+#[rustfmt::skip]
 mod capnp_protocol {
     include!("../protocols/capnp/logger_msg.rs");
 }
@@ -61,7 +63,7 @@ pub async fn handle_grpc_message(
         .map_err(|e| format!("message formatting failed: {e}"))?;
 
     let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
-    let final_message = format!("{} {}", sequence, formatted_message);
+    let final_message = format!("{sequence} {formatted_message}");
 
     writer_tx
         .send(final_message)
