@@ -8,8 +8,9 @@ on:
     branches: [main, develop]
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true   # Opt into Node.js 24
   REGISTRY: ghcr.io
-mount /dev/  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository }}
   # Enable cargo-clippy and cargo-fmt
   RUSTFLAGS: "-Dwarnings"
 
