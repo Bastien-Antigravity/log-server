@@ -11,9 +11,6 @@ use tokio::{
     time::{sleep, Duration},
 };
 
-
-
-
 /// Log writer configuration
 #[derive(Clone)]
 pub struct WriterConfig {
@@ -54,39 +51,39 @@ impl LogWriter {
     /// Create new log writer
     pub async fn new() -> Result<Self, std::io::Error> {
         let log_dir = crate::utils::helpers::get_exec_parent_dir().join("logs");
-        
+
         // Ensure log directory exists
         if let Some(log_dir_str) = log_dir.to_str() {
             crate::utils::helpers::create_log_folder(log_dir_str)?;
         }
-        
+
         let base_file_path = log_dir.join("_main.log");
-            
+
         Ok(Self {
             config: WriterConfig::default(),
             base_file_path,
         })
     }
-    
+
     //-----------------------------------------------------------------------------------------------
-    
+
     /// Start the writer task
     pub fn start_writer_task(&self) -> mpsc::Sender<String> {
         let (writer_tx, writer_rx) = mpsc::channel::<String>(self.config.buffer_size);
         let base_path = self.base_file_path.clone();
         let config = self.config.clone();
-        
+
         tokio::spawn(async move {
             if let Err(e) = Self::writer_task(writer_rx, base_path, config).await {
                 eprintln!("Writer task failed: {}", e);
             }
         });
-        
+
         writer_tx
     }
-    
+
     //-----------------------------------------------------------------------------------------------
-    
+
     /// Main writer task implementation
     async fn writer_task(
         mut rx: mpsc::Receiver<String>,
@@ -162,9 +159,9 @@ impl LogWriter {
         file.flush().await?;
         Ok(())
     }
-    
+
     //-----------------------------------------------------------------------------------------------
-    
+
     /// Write batch with retry logic
     async fn write_batch(
         file: &mut File,
@@ -188,17 +185,14 @@ impl LogWriter {
             } else if attempt < config.max_retries {
                 sleep(Duration::from_millis(config.retry_delay_ms)).await;
             } else {
-                return Err(tokio::io::Error::new(
-                    tokio::io::ErrorKind::Other,
-                    "Write failed after maximum retries",
-                ));
+                return Err(std::io::Error::other("Write failed after maximum retries"));
             }
         }
         Ok(())
     }
-    
+
     //-----------------------------------------------------------------------------------------------
-    
+
     /// Rotate log files
     async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
         for i in (1..=backup_count).rev() {

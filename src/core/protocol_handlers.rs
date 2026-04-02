@@ -3,12 +3,12 @@
 //! Handles Cap'n Proto deserialization and message mapping to internal models.
 
 use capnp::{message::ReaderOptions, serialize_packed};
-use tokio::sync::mpsc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
-use crate::models::log_entry::{LogEntry, LEVEL_STRINGS};
 use crate::core::log_formatter::format_log_message;
+use crate::models::log_entry::{LogEntry, LEVEL_STRINGS};
 
 mod capnp_protocol {
     include!("../protocols/capnp/logger_msg.rs");
@@ -23,13 +23,12 @@ pub async fn handle_tcp_message(
     sequence_counter: Arc<AtomicU64>,
     _client_name: &str,
 ) -> Result<(), String> {
-    
     // Perform Cap'n Proto deserialization in the current thread
     let formatted_message = {
         // All Cap'n Proto work happens in this block
         let reader = serialize_packed::read_message(&mut &data[..], ReaderOptions::new())
             .map_err(|e| format!("deserialization failed: {}", e))?;
-            
+
         let log_message = reader
             .get_root::<capnp_protocol::logger_msg::Reader<'_>>()
             .map_err(|e| format!("invalid message format: {}", e))?;
@@ -41,12 +40,12 @@ pub async fn handle_tcp_message(
     // Send to writer with sequence number
     let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
     let final_message = format!("{} {}", sequence, formatted_message);
-    
+
     writer_tx
         .send(final_message)
         .await
         .map_err(|e| format!("failed to queue message: {}", e))?;
-        
+
     Ok(())
 }
 
@@ -58,18 +57,17 @@ pub async fn handle_grpc_message(
     writer_tx: mpsc::Sender<String>,
     sequence_counter: Arc<AtomicU64>,
 ) -> Result<(), String> {
-    
     let formatted_message = format_log_message_from_grpc(log_request)
         .map_err(|e| format!("message formatting failed: {}", e))?;
 
     let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
     let final_message = format!("{} {}", sequence, formatted_message);
-    
+
     writer_tx
         .send(final_message)
         .await
         .map_err(|e| format!("failed to queue gRPC message: {}", e))?;
-        
+
     Ok(())
 }
 
@@ -79,7 +77,6 @@ pub async fn handle_grpc_message(
 fn format_log_message_from_capnp(
     log_message: capnp_protocol::logger_msg::Reader<'_>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    
     let timestamp = log_message.get_timestamp()?.to_str()?;
     let hostname = log_message.get_hostname()?.to_str()?;
     let logger_name = log_message.get_logger_name()?.to_str()?;
@@ -98,8 +95,22 @@ fn format_log_message_from_capnp(
     let stack_trace = log_message.get_stack_trace()?.to_str()?;
 
     Ok(format_log_message(
-        timestamp, hostname, logger_name, level, module, filename, function_name, line_number, 
-        message, path_name, process_id, process_name, thread_id, thread_name, service_name, stack_trace
+        timestamp,
+        hostname,
+        logger_name,
+        level,
+        module,
+        filename,
+        function_name,
+        line_number,
+        message,
+        path_name,
+        process_id,
+        process_name,
+        thread_id,
+        thread_name,
+        service_name,
+        stack_trace,
     ))
 }
 
@@ -109,7 +120,6 @@ fn format_log_message_from_capnp(
 fn format_log_message_from_grpc(
     log_message: LogEntry,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    
     Ok(format_log_message(
         &log_message.timestamp,
         &log_message.hostname,

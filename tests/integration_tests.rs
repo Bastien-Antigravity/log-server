@@ -1,8 +1,8 @@
+use capnp::serialize_packed;
+use std::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, Duration};
-use tokio::io::AsyncWriteExt;
-use std::fs;
-use capnp::serialize_packed;
 
 use log_server::core::log_server::LogServer;
 use log_server::utils::helpers::get_exec_parent_dir;
@@ -20,7 +20,7 @@ async fn test_full_log_pipeline() {
     // 1. Setup - get the log file path relative to the test executable
     let log_dir = get_exec_parent_dir().join("logs");
     let log_file_path = log_dir.join("_main.log");
-    
+
     // Clean start
     if log_file_path.exists() {
         let _ = fs::remove_file(&log_file_path);
@@ -32,7 +32,9 @@ async fn test_full_log_pipeline() {
     let grpc_port = 9921;
 
     // 1. Start the server in a background task
-    let server = LogServer::new(name, host, tcp_port, grpc_port, true).await.unwrap();
+    let server = LogServer::new(name, host, tcp_port, grpc_port, true)
+        .await
+        .unwrap();
     let server_handle = tokio::spawn(async move {
         // Run until aborted
         let _ = server.run().await;
@@ -63,19 +65,26 @@ async fn test_full_log_pipeline() {
         }
         sleep(Duration::from_millis(1000)).await;
     }
-    
-    assert!(success, "Log file should contain both messages. Path: {:?}\nContents last read:\n{}", log_file_path, contents);
+
+    assert!(
+        success,
+        "Log file should contain both messages. Path: {:?}\nContents last read:\n{}",
+        log_file_path, contents
+    );
 
     // Cleanup
     server_handle.abort();
 }
 
 async fn send_test_tcp_message(host: &str, port: u16) {
-    let mut stream = TcpStream::connect(format!("{}:{}", host, port)).await.expect("Failed to connect to TCP server");
-    
+    let mut stream = TcpStream::connect(format!("{}:{}", host, port))
+        .await
+        .expect("Failed to connect to TCP server");
+
     let mut message = ::capnp::message::Builder::new_default();
     {
-        let mut builder = message.init_root::<::log_server::protocols::capnp::logger_msg::logger_msg::Builder>();
+        let mut builder =
+            message.init_root::<::log_server::protocols::capnp::logger_msg::logger_msg::Builder>();
         builder.set_message("TCP_TEST_MESSAGE");
         builder.set_level(::log_server::protocols::capnp::logger_msg::Level::Info);
         builder.set_logger_name("tcp-client");
@@ -85,7 +94,7 @@ async fn send_test_tcp_message(host: &str, port: u16) {
 
     let mut buffer = Vec::new();
     serialize_packed::write_message(&mut buffer, &message).unwrap();
-    
+
     // Header: 4 bytes BE length (matching SafeSocket protocol)
     let len_prefix = (buffer.len() as u32).to_be_bytes();
     stream.write_all(&len_prefix).await.unwrap();
@@ -115,5 +124,8 @@ async fn send_test_grpc_message(host: &str, port: u16) {
         ..Default::default()
     });
 
-    client.log_message(request).await.expect("Failed to send gRPC message");
+    client
+        .log_message(request)
+        .await
+        .expect("Failed to send gRPC message");
 }

@@ -23,9 +23,15 @@ pub fn colorize_level(level: &str) -> String {
 }
 
 /// Formats and prints an internal server log message (visual alignment only)
-pub fn print_internal_log(level: &str, logger_name: &str, filename: &str, line: &str, message: &str) {
+pub fn print_internal_log(
+    level: &str,
+    logger_name: &str,
+    filename: &str,
+    line: &str,
+    message: &str,
+) {
     let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-    
+
     let formatted = format_log_message(
         &timestamp,
         "localhost",
@@ -36,7 +42,13 @@ pub fn print_internal_log(level: &str, logger_name: &str, filename: &str, line: 
         "internal",
         line,
         message,
-        "", "", "", "", "", "", ""
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
     );
 
     // Apply console coloring consistent with LogWriter

@@ -30,7 +30,6 @@ pub fn get_exec_parent_dir() -> PathBuf {
     }
 }
 
-
 //-----------------------------------------------------------------------------------------------
 
 /// Get current UTC timestamp as string
@@ -45,17 +44,17 @@ pub fn validate_file_path(path: &PathBuf, allowed_base: &PathBuf) -> Result<(), 
     if path.is_absolute() {
         return Err("Absolute paths are not allowed".to_string());
     }
-    
+
     if path.components().count() > 10 {
         return Err("Path too deep".to_string());
     }
-    
+
     // Check if path is within allowed base directory
     let full_path = allowed_base.join(path);
     if !full_path.starts_with(allowed_base) {
         return Err("Path traversal attempt detected".to_string());
     }
-    
+
     Ok(())
 }
 

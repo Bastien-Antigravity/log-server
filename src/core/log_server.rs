@@ -4,15 +4,12 @@
 
 use std::sync::Arc;
 
-use crate::servers::tcp_server::TcpServer;
-use crate::servers::grpc_server::GrpcServer;
-use crate::core::log_writer::LogWriter;
 use crate::config::config::Config;
+use crate::core::log_writer::LogWriter;
+use crate::servers::grpc_server::GrpcServer;
+use crate::servers::tcp_server::TcpServer;
 use crate::utils::terminal_ui::print_internal_log;
 
-
-
- 
 /// Main log server orchestrator
 pub struct LogServer {
     name: String,
@@ -25,15 +22,21 @@ pub struct LogServer {
 
 impl LogServer {
     /// Create new log server instance
-    pub async fn new(name: &str, host: &str, port: u16, grpc_port: u16, enable_grpc: bool) -> Result<Self, Box<dyn std::error::Error>> {
+    pub async fn new(
+        name: &str,
+        host: &str,
+        port: u16,
+        grpc_port: u16,
+        enable_grpc: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let config = Config::new(name, host, port, grpc_port);
-        
+
         // Create log directory
         crate::utils::helpers::create_log_folder("logs")?;
-        
+
         // Initialize writer
         let writer = Arc::new(LogWriter::new().await?);
-        
+
         Ok(Self {
             name: name.to_string(),
             config,
@@ -41,16 +44,22 @@ impl LogServer {
             enable_grpc,
         })
     }
-    
+
     //-----------------------------------------------------------------------------------------------
-    
+
     /// Run the log server with all components
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
-        print_internal_log("INFO", &self.name, "log_server.rs", "48", "starting server components");
-        
+        print_internal_log(
+            "INFO",
+            &self.name,
+            "log_server.rs",
+            "48",
+            "starting server components",
+        );
+
         // Start a single writer task for all components to share
         let writer_tx = self.writer.start_writer_task();
-        
+
         // Centralized sequence counter for global ordering
         let sequence_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
@@ -58,37 +67,55 @@ impl LogServer {
         let tcp_server = TcpServer::new(&self.config);
         let tcp_writer_tx = writer_tx.clone();
         let tcp_sequence_counter = sequence_counter.clone();
-        
+
         let tcp_handle = tokio::spawn(async move {
             if let Err(e) = tcp_server.run(tcp_writer_tx, tcp_sequence_counter).await {
-                print_internal_log("ERROR", tcp_server.name(), "log_server.rs", "55", &format!("TCP server error: {}", e));
+                print_internal_log(
+                    "ERROR",
+                    tcp_server.name(),
+                    "log_server.rs",
+                    "55",
+                    &format!("TCP server error: {}", e),
+                );
             }
         });
-        
+
         // Conditionally start gRPC server
         let grpc_handle = if self.enable_grpc {
             let grpc_server = GrpcServer::new(&self.config);
             let grpc_writer_tx = writer_tx.clone();
             let grpc_sequence_counter = sequence_counter.clone();
-            
+
             Some(tokio::spawn(async move {
                 if let Err(e) = grpc_server.run(grpc_writer_tx, grpc_sequence_counter).await {
-                    print_internal_log("ERROR", grpc_server.name(), "log_server.rs", "64", &format!("gRPC server error: {}", e));
+                    print_internal_log(
+                        "ERROR",
+                        grpc_server.name(),
+                        "log_server.rs",
+                        "64",
+                        &format!("gRPC server error: {}", e),
+                    );
                 }
             }))
         } else {
             None
         };
-        
-        print_internal_log("INFO", &self.name, "log_server.rs", "71", "all server components started");
-        
+
+        print_internal_log(
+            "INFO",
+            &self.name,
+            "log_server.rs",
+            "71",
+            "all server components started",
+        );
+
         // Wait for servers to complete
         let _ = tcp_handle.await;
-        
+
         if let Some(grpc_handle) = grpc_handle {
-        let _ = grpc_handle.await;
+            let _ = grpc_handle.await;
         }
-        
+
         Ok(())
     }
 }
