@@ -13,8 +13,16 @@ fn main() {
         .arg(Arg::new("name").long("name").default_value("log-server"))
         .arg(Arg::new("host").long("host").default_value("127.0.0.1"))
         .arg(Arg::new("port").long("port").default_value("9020"))
-        .arg(Arg::new("grpc_port").long("grpc_port").default_value("9021"))
-        .arg(Arg::new("enable_grpc").long("enable_grpc").action(clap::ArgAction::SetTrue))
+        .arg(
+            Arg::new("grpc_port")
+                .long("grpc_port")
+                .default_value("9021"),
+        )
+        .arg(
+            Arg::new("enable_grpc")
+                .long("enable_grpc")
+                .action(clap::ArgAction::SetTrue),
+        )
         .get_matches();
 
     let name = matches.get_one::<String>("name").unwrap();
