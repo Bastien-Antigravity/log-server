@@ -27,24 +27,24 @@ pub async fn handle_tcp_message(
     let formatted_message = {
         // All Cap'n Proto work happens in this block
         let reader = serialize_packed::read_message(&mut &data[..], ReaderOptions::new())
-            .map_err(|e| format!("deserialization failed: {}", e))?;
+            .map_err(|e| format!("deserialization failed: {e}"))?;
 
         let log_message = reader
             .get_root::<capnp_protocol::logger_msg::Reader<'_>>()
-            .map_err(|e| format!("invalid message format: {}", e))?;
+            .map_err(|e| format!("invalid message format: {e}"))?;
 
         format_log_message_from_capnp(log_message)
-            .map_err(|e| format!("message formatting failed: {}", e))?
+            .map_err(|e| format!("message formatting failed: {e}"))?
     };
 
     // Send to writer with sequence number
     let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
-    let final_message = format!("{} {}", sequence, formatted_message);
+    let final_message = format!("{sequence} {formatted_message}");
 
     writer_tx
         .send(final_message)
         .await
-        .map_err(|e| format!("failed to queue message: {}", e))?;
+        .map_err(|e| format!("failed to queue message: {e}"))?;
 
     Ok(())
 }
@@ -58,7 +58,7 @@ pub async fn handle_grpc_message(
     sequence_counter: Arc<AtomicU64>,
 ) -> Result<(), String> {
     let formatted_message = format_log_message_from_grpc(log_request)
-        .map_err(|e| format!("message formatting failed: {}", e))?;
+        .map_err(|e| format!("message formatting failed: {e}"))?;
 
     let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
     let final_message = format!("{} {}", sequence, formatted_message);
@@ -66,7 +66,7 @@ pub async fn handle_grpc_message(
     writer_tx
         .send(final_message)
         .await
-        .map_err(|e| format!("failed to queue gRPC message: {}", e))?;
+        .map_err(|e| format!("failed to queue gRPC message: {e}"))?;
 
     Ok(())
 }

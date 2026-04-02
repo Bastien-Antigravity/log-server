@@ -31,7 +31,7 @@ impl Default for WriterConfig {
             buffer_size: 1024,
             max_retries: 3,
             retry_delay_ms: 100,
-            max_file_bytes: 1 * 1024 * 1024, // 1 MB
+            max_file_bytes: 1024 * 1024, // 1 MB
             backup_count: 10,
         }
     }
@@ -75,7 +75,7 @@ impl LogWriter {
 
         tokio::spawn(async move {
             if let Err(e) = Self::writer_task(writer_rx, base_path, config).await {
-                eprintln!("Writer task failed: {}", e);
+                eprintln!("Writer task failed: {e}");
             }
         });
 
@@ -117,7 +117,7 @@ impl LogWriter {
                             // Print to console with colors
                             println!("{}{}{}", &data[..63], colored_level, &data[71..]);
                         } else {
-                            println!("{}", data);
+                            println!("{data}");
                         }
 
                         batch.push(data);
@@ -152,7 +152,7 @@ impl LogWriter {
 
         // Flush remaining messages
         for (_, data) in buffer {
-            let log_entry = format!("{}\n", data);
+            let log_entry = format!("{data}\n");
             file.write_all(log_entry.as_bytes()).await?;
         }
 
@@ -172,7 +172,7 @@ impl LogWriter {
         for attempt in 0..=config.max_retries {
             let mut success = true;
             for data in batch {
-                let log_entry = format!("{}\n", data);
+                let log_entry = format!("{data}\n");
                 if file.write_all(log_entry.as_bytes()).await.is_err() {
                     success = false;
                     break;
@@ -197,7 +197,7 @@ impl LogWriter {
     async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
         for i in (1..=backup_count).rev() {
             let old_path = base_path.with_extension(format!("log.{}", i - 1));
-            let new_path = base_path.with_extension(format!("log.{}", i));
+            let new_path = base_path.with_extension(format!("log.{i}"));
 
             if fs::metadata(&old_path).await.is_ok() {
                 fs::rename(&old_path, &new_path).await?;

@@ -40,25 +40,25 @@ pub fn format_log_message(
     // 2. Extra metadata (key=value)
     let mut meta = Vec::new();
     if !module.is_empty() {
-        meta.push(format!("mod={}", module));
+        meta.push(format!("mod={module}"));
     }
     if !path_name.is_empty() {
-        meta.push(format!("path={}", path_name));
+        meta.push(format!("path={path_name}"));
     }
     if !process_id.is_empty() {
-        meta.push(format!("pid={}", process_id));
+        meta.push(format!("pid={process_id}"));
     }
     if !process_name.is_empty() {
-        meta.push(format!("pname={}", process_name));
+        meta.push(format!("pname={process_name}"));
     }
     if !thread_id.is_empty() {
-        meta.push(format!("tid={}", thread_id));
+        meta.push(format!("tid={thread_id}"));
     }
     if !thread_name.is_empty() {
-        meta.push(format!("tname={}", thread_name));
+        meta.push(format!("tname={thread_name}"));
     }
     if !service_name.is_empty() {
-        meta.push(format!("svc={}", service_name));
+        meta.push(format!("svc={service_name}"));
     }
 
     // Stack trace handling: append it last

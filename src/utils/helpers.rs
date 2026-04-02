@@ -6,7 +6,7 @@ use std::path::PathBuf;
 pub fn create_log_folder(path: &str) -> std::io::Result<()> {
     if std::fs::metadata(path).is_err() {
         std::fs::create_dir_all(path)?;
-        println!("Created log directory: {}", path);
+        println!("Created log directory: {path}");
     }
     Ok(())
 }
@@ -24,7 +24,7 @@ pub fn get_exec_parent_dir() -> PathBuf {
             }
         },
         Err(e) => {
-            eprintln!("Failed to get the executable path: {}", e);
+            eprintln!("Failed to get the executable path: {e}");
             std::process::exit(1);
         }
     }

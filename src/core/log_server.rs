@@ -75,7 +75,7 @@ impl LogServer {
                     tcp_server.name(),
                     "log_server.rs",
                     "55",
-                    &format!("TCP server error: {}", e),
+                    &format!("TCP server error: {e}"),
                 );
             }
         });
@@ -93,7 +93,7 @@ impl LogServer {
                         grpc_server.name(),
                         "log_server.rs",
                         "64",
-                        &format!("gRPC server error: {}", e),
+                        &format!("gRPC server error: {e}"),
                     );
                 }
             }))

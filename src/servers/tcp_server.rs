@@ -46,7 +46,7 @@ impl TcpServer {
             &self.config.name,
             "tcp_server.rs",
             "40",
-            &format!("TCP server listening on {}", addr),
+            &format!("TCP server listening on {addr}"),
         );
 
         // Main server loop
@@ -66,7 +66,7 @@ impl TcpServer {
                         &client_name,
                         "tcp_server.rs",
                         "54",
-                        &format!("{} - connection handler failed: {}", client_name, e),
+                        &format!("{client_name} - connection handler failed: {e}"),
                     );
                 }
             });
@@ -88,7 +88,7 @@ impl TcpServer {
             name,
             "tcp_server.rs",
             "71",
-            &format!("client connected ({})", name),
+            &format!("client connected ({name})"),
         );
 
         loop {
@@ -100,7 +100,7 @@ impl TcpServer {
                     name,
                     "tcp_server.rs",
                     "77",
-                    &format!("client disconnected ({})", name),
+                    &format!("client disconnected ({name})"),
                 );
                 break;
             }
@@ -116,7 +116,7 @@ impl TcpServer {
                     name,
                     "tcp_server.rs",
                     "85",
-                    &format!("{} - message handling failed: {}", name, e),
+                    &format!("{name} - message handling failed: {e}"),
                 );
                 break;
             }

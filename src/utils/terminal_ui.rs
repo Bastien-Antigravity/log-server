@@ -19,7 +19,7 @@ pub fn colorize_level(level: &str) -> String {
         "ERROR" | "CRITICAL" => COLOR_RED,
         _ => return level.to_string(),
     };
-    format!("{}{}{}", color, level, COLOR_RESET)
+    format!("{color}{level}{COLOR_RESET}")
 }
 
 /// Formats and prints an internal server log message (visual alignment only)
@@ -57,6 +57,6 @@ pub fn print_internal_log(
         let colored = colorize_level(level_part);
         println!("{}{}{}", &formatted[..63], colored, &formatted[71..]);
     } else {
-        println!("{}", formatted);
+        println!("{formatted}");
     }
 }
