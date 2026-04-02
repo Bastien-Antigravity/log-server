@@ -5,42 +5,46 @@ use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::common::config::ServerConfig;
-use crate::common::safe_socket::SafeSocket;
-use crate::core::writers::LogWriter;
-use crate::core::handlers::handle_tcp_message;
+use crate::config::config::Config;
+use crate::transport::safe_socket::SafeSocket;
+use crate::core::protocol_handlers::handle_tcp_message;
+use crate::utils::terminal_ui::print_internal_log;
 
 
 
 
 /// TCP server for Cap'n Proto log messages
 pub struct TcpServer {
-    config: ServerConfig,
-    writer: Arc<LogWriter>,
+    config: Config,
 }
 
 //-----------------------------------------------------------------------------------------------
 
 impl TcpServer {
     /// Create new TCP server
-    pub fn new(config: &ServerConfig, writer: Arc<LogWriter>) -> Self {
+    pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
-            writer,
         }
+    }
+
+    /// Get server name
+    pub fn name(&self) -> &str {
+        &self.config.name
     }
     
     //-----------------------------------------------------------------------------------------------
     
     /// Run the TCP server
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(
+        &self,
+        writer_tx: mpsc::Sender<String>,
+        sequence_counter: Arc<AtomicU64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("{}:{}", self.config.host, self.config.port);
         let listener = TcpListener::bind(&addr).await?;
         
-        println!("{} : TCP server listenning on {}", self.config.name, addr);
-        
-        let sequence_counter = Arc::new(AtomicU64::new(0));
-        let writer_tx = self.writer.start_writer_task();
+        print_internal_log("INFO", &self.config.name, "tcp_server.rs", "40", &format!("TCP server listening on {}", addr));
         
         // Main server loop
         loop {
@@ -51,7 +55,7 @@ impl TcpServer {
             
             tokio::spawn(async move {
                 if let Err(e) = Self::handle_tcp_connection(socket, writer_tx, sequence_counter, &client_name).await {
-                    eprintln!("{} : connection handler failed - {}", client_name, e);
+                    print_internal_log("ERROR", &client_name, "tcp_server.rs", "54", &format!("{} - connection handler failed: {}", client_name, e));
                 }
             });
         }
@@ -68,13 +72,13 @@ impl TcpServer {
     ) -> Result<(), Box<dyn std::error::Error>> {
         
         let mut safe_socket = SafeSocket::new(socket);
-        println!("{} : client connected", name);
+        print_internal_log("INFO", name, "tcp_server.rs", "71", &format!("client connected ({})", name));
 
         loop {
             let bytes_read = safe_socket.receive_data().await?;
 
             if bytes_read.is_none() {
-                println!("{} : client disconnected", name);
+                print_internal_log("INFO", name, "tcp_server.rs", "77", &format!("client disconnected ({})", name));
                 break;
             }
 
@@ -82,7 +86,7 @@ impl TcpServer {
             
             // Connection closed, or corrupted message -> close connection, client socket have to manage reconnection
             if let Err(e) = handle_tcp_message(data, writer_tx.clone(), sequence_counter.clone(), name).await {
-                eprintln!("{} : message handling failed - {}", name, e);
+                print_internal_log("ERROR", name, "tcp_server.rs", "85", &format!("{} - message handling failed: {}", name, e));
                 break;
             }
         }

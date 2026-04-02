@@ -224,7 +224,7 @@ pub mod logger_msg {
       !self.reader.get_pointer_field(3).is_null()
     }
     #[inline]
-    pub fn get_level(self) -> ::core::result::Result<crate::logger_capnp::logger_msg::Level,::capnp::NotInSchema> {
+    pub fn get_level(self) -> ::core::result::Result<crate::protocols::capnp::logger_msg::Level,::capnp::NotInSchema> {
       ::core::convert::TryInto::try_into(self.reader.get_data_field::<u16>(0))
     }
     #[inline]
@@ -434,11 +434,11 @@ pub mod logger_msg {
       !self.builder.is_pointer_field_null(3)
     }
     #[inline]
-    pub fn get_level(self) -> ::core::result::Result<crate::logger_capnp::logger_msg::Level,::capnp::NotInSchema> {
+    pub fn get_level(self) -> ::core::result::Result<crate::protocols::capnp::logger_msg::Level,::capnp::NotInSchema> {
       ::core::convert::TryInto::try_into(self.builder.get_data_field::<u16>(0))
     }
     #[inline]
-    pub fn set_level(&mut self, value: crate::logger_capnp::logger_msg::Level)  {
+    pub fn set_level(&mut self, value: crate::protocols::capnp::logger_msg::Level)  {
       self.builder.set_data_field::<u16>(0, value as u16);
     }
     #[inline]
@@ -909,7 +909,7 @@ pub mod logger_msg {
         1 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
         2 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
         3 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
-        4 => <crate::logger_capnp::logger_msg::Level as ::capnp::introspect::Introspect>::introspect(),
+        4 => <crate::protocols::capnp::logger_msg::Level as ::capnp::introspect::Introspect>::introspect(),
         5 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
         6 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),
         7 => <::capnp::text::Owned as ::capnp::introspect::Introspect>::introspect(),

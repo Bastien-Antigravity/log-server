@@ -7,9 +7,10 @@ use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
-use crate::common::config::ServerConfig;
-use crate::core::writers::LogWriter;
-use crate::core::handlers::handle_grpc_message;
+use crate::config::config::Config;
+use crate::models::log_entry::LogEntry;
+use crate::core::protocol_handlers::handle_grpc_message;
+use crate::utils::terminal_ui::print_internal_log;
 
 // Add this line - it includes the generated gRPC code
 pub mod log_service {
@@ -25,29 +26,36 @@ use log_service::{
 
 /// gRPC server for log messages
 pub struct GrpcServer {
-    config: ServerConfig,
-    writer: Arc<LogWriter>,
+    config: Config,
 }
 
 //-----------------------------------------------------------------------------------------------
 
 impl GrpcServer {
     /// Create new gRPC server
-    pub fn new(config: &ServerConfig, writer: Arc<LogWriter>) -> Self {
+    pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
-            writer,
         }
+    }
+
+    /// Get server name
+    pub fn name(&self) -> &str {
+        &self.config.name
     }
     
     //-----------------------------------------------------------------------------------------------
     
     /// Run the gRPC server
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(
+        &self,
+        writer_tx: mpsc::Sender<String>,
+        sequence_counter: Arc<AtomicU64>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("{}:{}", self.config.host, self.config.grpc_port).parse()?;
-        let service = GrpcLogServiceImpl::new(&self.config, self.writer.clone());
+        let service = GrpcLogServiceImpl::new(&self.config, writer_tx, sequence_counter);
         
-        println!("{} : gRPC server listening on {}", self.config.name, addr);
+        print_internal_log("INFO", &self.config.name, "grpc_server.rs", "51", &format!("gRPC server listening on {}", addr));
         
         Server::builder()
             .add_service(LogServiceServer::new(service))
@@ -71,10 +79,7 @@ pub struct GrpcLogServiceImpl {
 
 impl GrpcLogServiceImpl {
     /// Create new gRPC service implementation
-    pub fn new(config: &ServerConfig, writer: Arc<LogWriter>) -> Self {
-        let writer_tx = writer.start_writer_task();
-        let sequence_counter = Arc::new(AtomicU64::new(0));
-        
+    pub fn new(config: &Config, writer_tx: mpsc::Sender<String>, sequence_counter: Arc<AtomicU64>) -> Self {
         Self {
             writer_tx,
             sequence_counter,
@@ -95,13 +100,13 @@ impl LogService for GrpcLogServiceImpl {
         let log_data = request.into_inner();
         
         // Convert to internal type and handle
-        let internal_request = InternalLogRequest::from(log_data);  // Use the new name
+        let internal_request = LogEntry::from(log_data);  // Use the new name
         match handle_grpc_message(internal_request, self.writer_tx.clone(), self.sequence_counter.clone()).await {
             Ok(_) => {
                 Ok(Response::new(LogResponse { success: true }))
             }
             Err(e) => {
-                eprintln!("{} : failed to process gRPC message - {}", self.name, e);
+                print_internal_log("ERROR", &self.name, "grpc_server.rs", "105", &format!("{} - failed to process gRPC message: {}", self.name, e));
                 Err(Status::internal(format!("Failed to process log message: {}", e)))
             }
         }
@@ -110,32 +115,26 @@ impl LogService for GrpcLogServiceImpl {
 
 //-----------------------------------------------------------------------------------------------
 
-/// Internal log request wrapper for internal use
-pub struct InternalLogRequest {  // Renamed to avoid conflict
-    pub timestamp: String,
-    pub hostname: String,
-    pub logger_name: String,
-    pub level: i32,
-    pub filename: String,
-    pub function_name: String,
-    pub line_number: String,
-    pub message: String,
-}
-
-//-----------------------------------------------------------------------------------------------
-
 // Conversion from protobuf to internal type
-impl From<ProtoLogRequest> for InternalLogRequest {  // Use the renamed types
+impl From<ProtoLogRequest> for LogEntry {  // Use the renamed types
     fn from(request: ProtoLogRequest) -> Self {
         Self {
             timestamp: request.timestamp,
             hostname: request.hostname,
             logger_name: request.logger_name,
             level: request.level,
+            module: request.module,
             filename: request.filename,
             function_name: request.function_name,
             line_number: request.line_number,
             message: request.message,
+            path_name: request.path_name,
+            process_id: request.process_id,
+            process_name: request.process_name,
+            thread_id: request.thread_id,
+            thread_name: request.thread_name,
+            service_name: request.service_name,
+            stack_trace: request.stack_trace,
         }
     }
 }

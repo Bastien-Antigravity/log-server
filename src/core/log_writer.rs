@@ -53,9 +53,14 @@ pub struct LogWriter {
 impl LogWriter {
     /// Create new log writer
     pub async fn new() -> Result<Self, std::io::Error> {
-        let base_file_path = crate::utils::helpers::get_exec_parent_dir()
-            .join("logs")
-            .join("_main.log");
+        let log_dir = crate::utils::helpers::get_exec_parent_dir().join("logs");
+        
+        // Ensure log directory exists
+        if let Some(log_dir_str) = log_dir.to_str() {
+            crate::utils::helpers::create_log_folder(log_dir_str)?;
+        }
+        
+        let base_file_path = log_dir.join("_main.log");
             
         Ok(Self {
             config: WriterConfig::default(),
@@ -108,6 +113,16 @@ impl LogWriter {
 
                 for _ in 0..batch_size {
                     if let Some(data) = buffer.remove(&current_sequence) {
+                        // Print to console with colors
+                        if data.len() > 71 {
+                            let level = data[63..71].trim();
+                            let colored_level = crate::utils::terminal_ui::colorize_level(level);
+                            // Print to console with colors
+                            println!("{}{}{}", &data[..63], colored_level, &data[71..]);
+                        } else {
+                            println!("{}", data);
+                        }
+
                         batch.push(data);
                         current_sequence += 1;
                     } else {

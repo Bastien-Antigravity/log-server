@@ -4,7 +4,8 @@
 //! and gRPC log messages with ordered file writing and rotation.
 
 use clap::{Arg, Command};
-use log_server::core::servers::LogServer;
+use log_server::core::log_server::LogServer;
+use log_server::utils::terminal_ui::print_internal_log;
 
 
 
@@ -37,14 +38,14 @@ fn main() {
     let grpc_port = matches.get_one::<String>("grpc_port").unwrap().parse::<u16>().unwrap();
     let enable_grpc = matches.get_flag("enable_grpc");
     
-    println!("{} : starting log server", name);
+    print_internal_log("INFO", name, "main.rs", "40", &format!("starting log server (name: {})", name));
     if enable_grpc {
-        println!("gRPC enabled");
+        print_internal_log("DEBUG", name, "main.rs", "42", "gRPC server enabled");
     }
     
     // Run the server
     if let Err(e) = run_server(name, host, port, grpc_port, enable_grpc) {
-        eprintln!("{} : server failed - {}", name, e);
+        print_internal_log("ERROR", name, "main.rs", "47", &format!("server failed - {}", e));
         std::process::exit(1);
     }
 }

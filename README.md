@@ -17,27 +17,32 @@ A high-performance, centralized logging server written in Rust that handles both
 ```
 log-server/
 ├── src/
-│   ├── core/           # Core business logic (handlers, writers, orchestration)
-│   │   ├── servers.rs  # Main server orchestrator
-│   │   ├── handlers.rs # Message processing and formatting
-│   │   └── writers.rs  # File writer with ordering and rotation
-│   ├── network/        # Network protocol implementations
-│   │   ├── tcp_server.rs  # TCP socket server (Cap'n Proto)
-│   │   └── grpc_server.rs # gRPC server implementation
-│   ├── common/         # Shared utilities and configuration
-│   │   ├── config.rs   # Server configuration
-│   │   └── safe_socket.rs # Safe TCP socket wrapper with framing
-│   ├── logger_capnp/   # Generated Cap'n Proto code
+│   ├── config/           # Server configuration (Config struct)
+│   ├── core/             # Core business logic
+│   │   ├── log_server.rs    # Main orchestrator (LogServer object)
+│   │   ├── log_writer.rs    # File/Console output (LogWriter object)
+│   │   ├── protocol_handlers.rs # Message processing logic
+│   │   └── log_formatter.rs # Logfmt/Console formatting
+│   ├── models/           # Data definitions
+│   │   └── log_entry.rs     # Central LogEntry model
+│   ├── servers/          # Network entry points
+│   │   ├── tcp_server.rs    # Cap'n Proto socket server
+│   │   └── grpc_server.rs   # Tonic gRPC server
+│   ├── transport/        # Low-level communication
+│   │   └── safe_socket.rs   # TCP framing and socket management
+│   ├── protocols/        # Protocol schemas and generated code
+│   │   └── capnp/           # Cap'n Proto generated code
 │   ├── utils/
-│   │   └── helpers.rs  # Utility functions
-│   ├── main.rs         # Entry point
-│   └── lib.rs          # Library root
+│   │   ├── terminal_ui.rs   # ANSI coloring and terminal helpers
+│   │   └── helpers.rs       # IO and string utilities
+│   ├── main.rs           # Entry point binary
+│   └── lib.rs            # Library entry
 ├── capnp/
-│   └── logger.capnp    # Cap'n Proto schema
+│   └── logger.capnp      # Cap'n Proto schema
 ├── proto/
 │   └── log_service.proto # gRPC proto definition
-├── Dockerfile          # Container definition
-└── docker-compose.yml  # Multi-container orchestration
+├── Dockerfile            # Container definition
+└── docker-compose.yml    # Multi-container orchestration
 ```
 
 ## Installation
@@ -203,7 +208,7 @@ Example:
 
 ### Writer Configuration
 
-The log writer can be configured in `src/core/writers.rs`:
+The log writer can be configured in `src/core/log_writer.rs`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -305,11 +310,53 @@ cargo clippy
 
 ### Project Structure
 
-- `src/core/`: Core business logic (handlers, writers, orchestration)
-- `src/network/`: Network protocol implementations (TCP, gRPC)
-- `src/common/`: Shared utilities and configuration
-- `src/logger_capnp/`: Generated Cap'n Proto code
-- `src/utils/`: Helper functions
+- `src/config/`: Server configuration (Config struct)
+- `src/core/`: Core business logic (log_server, log_writer, protocol_handlers)
+- `src/models/`: Internal data model (LogEntry)
+- `src/servers/`: Network protocol entry points (TCP, gRPC)
+- `src/transport/`: Low-level communication logic
+- `src/protocols/`: Protocol schemas and generated code
+- `src/utils/`: Terminal UI and helper functions
+
+## Testing
+
+The Log Server includes a robust testing infrastructure covering both isolated logic and full system integration.
+
+### Core Features Tested
+- **Log Formatting**: Validates fixed-width column alignment, Logfmt metadata serialization, and string truncation.
+- **Protocol Handlers**: Verifies correct mapping from Cap'n Proto and gRPC messages to the internal `LogEntry` model.
+- **Global Sequencing**: Ensures messages from multiple protocols (TCP/gRPC) share a single, strictly ordered sequence.
+- **System Resilience**: Confirms the `LogWriter` handles directory creation and file rotation safely.
+
+### Test Categories
+
+#### 1. Unit Tests
+Located within the source files (e.g., `src/core/log_formatter.rs`), these tests verify internal utilities and data processing logic in isolation.
+
+#### 2. Integration Tests
+Located in `tests/integration_tests.rs`, this suite performs a full end-to-end verification:
+1. Starts a live `LogServer` instance on test ports.
+2. Connects real TCP (Cap'n Proto) and gRPC clients.
+3. Sends test traffic and verifies that the output `_main.log` contains correctly ordered and formatted entries.
+
+### How to Run Tests
+
+```bash
+# Run all tests (Unit + Integration)
+cargo test
+
+# Run only unit tests
+cargo test --lib
+
+# Run only integration tests
+cargo test --test integration_tests
+```
+
+### CI/CD Integration
+Every change is automatically validated via GitHub Actions:
+- **Linting**: `cargo clippy` enforces best practices.
+- **Formatting**: `cargo fmt` ensures style consistency.
+- **Automated Testing**: The full test suite must pass before code can be merged.
 
 ## Dependencies
 

@@ -2,9 +2,6 @@
 
 use std::path::PathBuf;
 
-
-
-
 /// Create log folder if not exists
 pub fn create_log_folder(path: &str) -> std::io::Result<()> {
     if std::fs::metadata(path).is_err() {
@@ -72,4 +69,43 @@ pub fn parse_sequence_number(message: &str) -> Option<(u64, &str)> {
         }
     }
     None
+}
+
+//-----------------------------------------------------------------------------------------------
+
+/// Helper to truncate long strings
+pub fn truncate(s: &str, max_len: usize) -> &str {
+    if s.len() > max_len {
+        &s[..max_len]
+    } else {
+        s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_truncate() {
+        assert_eq!(truncate("hello", 3), "hel");
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("", 5), "");
+    }
+
+    #[test]
+    fn test_parse_sequence_number() {
+        assert_eq!(parse_sequence_number("123 hello"), Some((123, "hello")));
+        assert_eq!(parse_sequence_number("0 key=val"), Some((0, "key=val")));
+        assert_eq!(parse_sequence_number("abc hello"), None);
+        assert_eq!(parse_sequence_number("123"), None);
+    }
+
+    #[test]
+    fn test_get_utc_timestamp() {
+        let ts = get_utc_timestamp();
+        // Should be RFC3339 format
+        assert!(ts.contains('T'));
+        assert!(ts.contains('Z') || ts.contains('+'));
+    }
 }
