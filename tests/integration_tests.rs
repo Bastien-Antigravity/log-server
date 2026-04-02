@@ -69,8 +69,7 @@ async fn test_full_log_pipeline() {
 
     assert!(
         success,
-        "Log file should contain both messages. Path: {:?}\nContents last read:\n{}",
-        log_file_path, contents
+        "Log file should contain both messages. Path: {log_file_path:?}\nContents last read:\n{contents}"
     );
 
     // Cleanup
@@ -78,7 +77,7 @@ async fn test_full_log_pipeline() {
 }
 
 async fn send_test_tcp_message(host: &str, port: u16) {
-    let mut stream = TcpStream::connect(format!("{}:{}", host, port))
+    let mut stream = TcpStream::connect(format!("{host}:{port}"))
         .await
         .expect("Failed to connect to TCP server");
 
