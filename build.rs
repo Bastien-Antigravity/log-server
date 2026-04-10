@@ -1,6 +1,10 @@
 // tools/build.rs
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Go up one level from tools/ to project root, then into src/logger_proto/
-    tonic_build::compile_protos("proto/log_service.proto")?;
+    let out_dir = std::env::var("OUT_DIR")?;
+    let descriptor_path = std::path::PathBuf::from(out_dir).join("log_service_descriptor.bin");
+
+    tonic_build::configure()
+        .file_descriptor_set_path(descriptor_path)
+        .compile(&["proto/log_service.proto"], &["proto"])?;
     Ok(())
 }

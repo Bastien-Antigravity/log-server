@@ -3,41 +3,23 @@
 //! Centralized logging server that handles both TCP socket (Cap'n Proto)
 //! and gRPC log messages with ordered file writing and rotation.
 
-use clap::{Arg, Command};
+use microservice_toolbox::config::loader::load_config;
 use log_server::core::log_server::LogServer;
 use log_server::utils::terminal_ui::print_internal_log;
 
 //================================================================
 fn main() {
-    let matches = Command::new("log-server")
-        .arg(Arg::new("name").long("name").default_value("log-server"))
-        .arg(Arg::new("host").long("host").default_value("127.0.0.1"))
-        .arg(Arg::new("port").long("port").default_value("9020"))
-        .arg(
-            Arg::new("grpc_port")
-                .long("grpc_port")
-                .default_value("9021"),
-        )
-        .arg(
-            Arg::new("enable_grpc")
-                .long("enable_grpc")
-                .action(clap::ArgAction::SetTrue),
-        )
-        .get_matches();
+    // 1. Initialize Toolbox Config (handles --grpc_port, --grpc_host, --name, etc.)
+    let app_config = load_config("standalone");
+    let cli = &app_config.cli_args;
 
-    let name = matches.get_one::<String>("name").unwrap();
-    let host = matches.get_one::<String>("host").unwrap();
-    let port = matches
-        .get_one::<String>("port")
-        .unwrap()
-        .parse::<u16>()
-        .unwrap();
-    let grpc_port = matches
-        .get_one::<String>("grpc_port")
-        .unwrap()
-        .parse::<u16>()
-        .unwrap();
-    let enable_grpc = matches.get_flag("enable_grpc");
+    let name = cli.name.as_deref().unwrap_or("log-server");
+    let host = cli.host.as_deref().unwrap_or("127.0.0.1");
+    let port = cli.port.unwrap_or(9020);
+    let grpc_port = cli.grpc_port.unwrap_or(9021);
+    
+    // Extract specific flags if needed
+    let enable_grpc = cli.extras.get("enable_grpc").map_or(false, |v| v == "true");
 
     print_internal_log(
         "INFO",
