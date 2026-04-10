@@ -5,7 +5,7 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{Request, Response, Status};
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_grpc_message;
