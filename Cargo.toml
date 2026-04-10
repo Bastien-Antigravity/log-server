@@ -14,7 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 tonic = "0.12"
 prost = "0.13"
 tokio-stream = "0.1"
-microservice-toolbox = { git = "https://github.com/Bastien-Antigravity/microservice-toolbox.git", tag = "rust/v0.1.4" }
+microservice-toolbox = { git = "https://github.com/Bastien-Antigravity/microservice-toolbox.git", tag = "rust/v0.1.5" }
 
 [build-dependencies]
 tonic-build = "0.12"
