@@ -3,9 +3,9 @@
 //! Centralized logging server that handles both TCP socket (Cap'n Proto)
 //! and gRPC log messages with ordered file writing and rotation.
 
-use microservice_toolbox::config::loader::load_config;
 use log_server::core::log_server::LogServer;
 use log_server::utils::terminal_ui::print_internal_log;
+use microservice_toolbox::config::loader::load_config;
 
 //================================================================
 fn main() {
@@ -17,7 +17,7 @@ fn main() {
     let host = cli.host.as_deref().unwrap_or("127.0.0.1");
     let port = cli.port.unwrap_or(9020);
     let grpc_port = cli.grpc_port.unwrap_or(9021);
-    
+
     // Extract specific flags if needed
     let enable_grpc = cli.extras.get("enable_grpc").map_or(false, |v| v == "true");
 
