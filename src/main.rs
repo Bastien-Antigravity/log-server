@@ -19,7 +19,7 @@ fn main() {
     let grpc_port = cli.grpc_port.unwrap_or(9021);
 
     // Extract specific flags if needed
-    let enable_grpc = cli.extras.get("enable_grpc").map_or(false, |v| v == "true");
+    let enable_grpc = cli.extras.get("enable_grpc").is_some_and(|v| v == "true");
 
     print_internal_log(
         "INFO",
