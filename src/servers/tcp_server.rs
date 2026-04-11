@@ -49,7 +49,7 @@ impl TcpServer {
             "INFO",
             &self.config.name,
             "tcp_server.rs",
-            "40",
+            "52",
             &format!("TCP server listening on {addr}"),
         );
 
@@ -69,7 +69,7 @@ impl TcpServer {
                         "ERROR",
                         &client_name,
                         "tcp_server.rs",
-                        "54",
+                        "72",
                         &format!("{client_name} - connection handler failed: {e}"),
                     );
                 }
@@ -86,13 +86,20 @@ impl TcpServer {
         sequence_counter: Arc<AtomicU64>,
         name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        let peer_addr = socket.peer_addr()?;
+        let local_addr = socket.local_addr()?;
+        let peer_ip = peer_addr.ip();
+        let peer_port = peer_addr.port();
+        let local_ip = local_addr.ip();
+        let local_port = local_addr.port();
+
         let mut safe_socket = SafeSocket::new(socket);
         print_internal_log(
             "INFO",
             name,
             "tcp_server.rs",
-            "71",
-            &format!("client connected ({name})"),
+            "101",
+            &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
         loop {
@@ -103,8 +110,8 @@ impl TcpServer {
                     "INFO",
                     name,
                     "tcp_server.rs",
-                    "77",
-                    &format!("client disconnected ({name})"),
+                    "113",
+                    &format!("{name} : TCP connection has been closed from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
                 );
                 break;
             }
@@ -119,8 +126,8 @@ impl TcpServer {
                     "ERROR",
                     name,
                     "tcp_server.rs",
-                    "85",
-                    &format!("{name} - message handling failed: {e}"),
+                    "129",
+                    &format!("{name} : message handling failed: {e}"),
                 );
                 break;
             }

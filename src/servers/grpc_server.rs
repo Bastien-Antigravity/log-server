@@ -64,7 +64,7 @@ impl GrpcServer {
             "INFO",
             &self.config.name,
             "grpc_server.rs",
-            "51",
+            "67",
             &format!("gRPC server listening on {addr}"),
         );
 
@@ -112,6 +112,11 @@ impl LogService for GrpcLogServiceImpl {
         &self,
         request: Request<ProtoLogRequest>, // Use the renamed type
     ) -> Result<Response<LogResponse>, Status> {
+        let remote_addr = request.remote_addr();
+        let client_id = match remote_addr {
+            Some(addr) => format!("grpc_client_{}", addr),
+            None => format!("grpc_client_unknown"),
+        };
         let log_data = request.into_inner();
 
         // Convert to internal type and handle
@@ -129,10 +134,10 @@ impl LogService for GrpcLogServiceImpl {
                     "ERROR",
                     &self.name,
                     "grpc_server.rs",
-                    "105",
+                    "132",
                     &format!(
-                        "{name} - failed to process gRPC message: {e}",
-                        name = self.name,
+                        "{client_id} : failed to process gRPC message: {e}",
+                        client_id = client_id,
                         e = e
                     ),
                 );
