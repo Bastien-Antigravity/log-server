@@ -1,6 +1,28 @@
 //! Common utility functions
 
 use std::path::PathBuf;
+use std::process::Command;
+use std::sync::OnceLock;
+
+/// Get system hostname (cached)
+pub fn get_hostname() -> &'static str {
+    static HOSTNAME: OnceLock<String> = OnceLock::new();
+    HOSTNAME.get_or_init(|| {
+        Command::new("hostname")
+            .output()
+            .ok()
+            .and_then(|output| {
+                if output.status.success() {
+                    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "localhost".to_string())
+    })
+}
+
+//-----------------------------------------------------------------------------------------------
 
 /// Create log folder if not exists
 pub fn create_log_folder(path: &str) -> std::io::Result<()> {
@@ -34,7 +56,7 @@ pub fn get_exec_parent_dir() -> PathBuf {
 
 /// Get current UTC timestamp as string
 pub fn get_utc_timestamp() -> String {
-    chrono::Utc::now().to_rfc3339()
+    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string()
 }
 
 //-----------------------------------------------------------------------------------------------

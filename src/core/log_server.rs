@@ -63,6 +63,9 @@ impl LogServer {
         // Centralized sequence counter for global ordering
         let sequence_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
 
+        // Initialize the internal logger so it can also write to files
+        crate::utils::terminal_ui::set_internal_logger(writer_tx.clone(), sequence_counter.clone());
+
         // Start TCP server (always)
         let tcp_server = TcpServer::new(&self.config);
         let tcp_writer_tx = writer_tx.clone();

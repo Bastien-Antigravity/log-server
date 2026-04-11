@@ -1,7 +1,18 @@
-//! Terminal UI and coloring utilities
-
 use crate::core::log_formatter::format_log_message;
+use crate::utils::helpers::get_hostname;
 use chrono::Local;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::mpsc;
+
+static INTERNAL_SENDER: OnceLock<mpsc::Sender<String>> = OnceLock::new();
+static INTERNAL_COUNTER: OnceLock<Arc<AtomicU64>> = OnceLock::new();
+
+/// Initialize the internal logger with a sender and counter
+pub fn set_internal_logger(sender: mpsc::Sender<String>, counter: Arc<AtomicU64>) {
+    let _ = INTERNAL_SENDER.set(sender);
+    let _ = INTERNAL_COUNTER.set(counter);
+}
 
 // ANSI color codes
 pub const COLOR_RESET: &str = "\x1b[0m";
@@ -30,14 +41,14 @@ pub fn print_internal_log(
     line: &str,
     message: &str,
 ) {
-    let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
 
     let formatted = format_log_message(
         &timestamp,
-        "localhost",
+        get_hostname(),
         logger_name,
         level,
-        "LogServer",
+        "log-server",
         filename,
         "internal",
         line,
@@ -52,11 +63,22 @@ pub fn print_internal_log(
     );
 
     // Apply console coloring consistent with LogWriter
-    if formatted.len() > 71 {
-        let level_part = formatted[63..71].trim();
+    // Threshold updated to 73 (pre-level 63 + level 10)
+    if formatted.len() > 73 {
+        let level_part = formatted[63..73].trim();
         let colored = colorize_level(level_part);
-        println!("{}{}{}", &formatted[..63], colored, &formatted[71..]);
+        println!("{}{}{}", &formatted[..63], colored, &formatted[73..]);
     } else {
         println!("{formatted}");
+    }
+
+    // Write to file if enabled
+    if let (Some(sender), Some(counter)) = (INTERNAL_SENDER.get(), INTERNAL_COUNTER.get()) {
+        let seq = counter.fetch_add(1, Ordering::SeqCst);
+        let file_msg = format!("{seq} {formatted}");
+        let sender = sender.clone();
+        tokio::spawn(async move {
+            let _ = sender.send(file_msg).await;
+        });
     }
 }

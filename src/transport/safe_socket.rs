@@ -42,6 +42,8 @@ impl SafeSocket {
         Ok(Some(chunk))
     }
 
+    //-----------------------------------------------------------------------------------------------
+
     /// Shutdown the underlying connection
     pub async fn shutdown(&mut self) -> io::Result<()> {
         self.conn.shutdown().await

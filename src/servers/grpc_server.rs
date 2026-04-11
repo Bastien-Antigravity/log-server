@@ -65,7 +65,7 @@ impl GrpcServer {
             &self.config.name,
             "grpc_server.rs",
             "67",
-            &format!("gRPC server listening on {addr}"),
+            &format!("{} : gRPC server listening on {}", self.config.name, addr),
         );
 
         Server::builder()
@@ -134,7 +134,7 @@ impl LogService for GrpcLogServiceImpl {
                     "ERROR",
                     &self.name,
                     "grpc_server.rs",
-                    "132",
+                    "137",
                     &format!(
                         "{client_id} : failed to process gRPC message: {e}",
                         client_id = client_id,

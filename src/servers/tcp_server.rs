@@ -50,7 +50,7 @@ impl TcpServer {
             &self.config.name,
             "tcp_server.rs",
             "52",
-            &format!("TCP server listening on {addr}"),
+            &format!("{} : TCP server listening on {}", self.config.name, addr),
         );
 
         // Main server loop
@@ -59,10 +59,10 @@ impl TcpServer {
             let writer_tx = writer_tx.clone();
             let sequence_counter = sequence_counter.clone();
             let client_name = format!("{name}_client_{addr}", name = self.config.name, addr = addr);
-
+            let server_name = self.config.name.clone();
             tokio::spawn(async move {
                 if let Err(e) =
-                    Self::handle_tcp_connection(socket, writer_tx, sequence_counter, &client_name)
+                    Self::handle_tcp_connection(socket, writer_tx, sequence_counter, &server_name)
                         .await
                 {
                     print_internal_log(
@@ -70,7 +70,7 @@ impl TcpServer {
                         &client_name,
                         "tcp_server.rs",
                         "72",
-                        &format!("{client_name} - connection handler failed: {e}"),
+                        &format!("{client_name} : connection handler failed: {e}"),
                     );
                 }
             });

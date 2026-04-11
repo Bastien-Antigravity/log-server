@@ -26,11 +26,11 @@ pub fn format_log_message(
 ) -> String {
     // 1. Basic 8 columns (Fixed width)
     let base = format!(
-        "{:<33} {:<12} {:<15} {:<8} {:<20} {:<25} {:<6} {}",
+        "{:<33} {:<12} {:<22} {:<10} {:<20} {:<25} {:<6} {}",
         timestamp,
         truncate(hostname, 12),
-        truncate(logger_name, 15),
-        truncate(level, 8),
+        truncate(logger_name, 22),
+        truncate(level, 10),
         truncate(filename, 20),
         truncate(function_name, 25),
         truncate(line_number, 6),
