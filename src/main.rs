@@ -38,11 +38,12 @@ fn main() {
         "INFO",
         name,
         "main.rs",
-        "41",
-        &format!("{name} : starting log server..."),
+        "main",
+        "37",
+        &format!("{name} : starting log server"),
     );
     if enable_grpc {
-        print_internal_log("INFO", name, "main.rs", "45", &format!("{name} : gRPC server enabled"));
+        print_internal_log("INFO", name, "main.rs", "main", "46", &format!("{name} : gRPC server enabled"));
     }
 
     // Run the server
@@ -51,7 +52,8 @@ fn main() {
             "ERROR",
             name,
             "main.rs",
-            "54",
+            "main",
+            "51",
             &format!("{name} : server starting failed - {e}"),
         );
         std::process::exit(1);

@@ -53,8 +53,9 @@ impl LogServer {
             "INFO",
             &self.name,
             "log_server.rs",
-            "48",
-            "starting server components",
+            "run",
+            "52",
+            &format!("{} : starting server components. .  .", self.name),
         );
 
         // Start a single writer task for all components to share
@@ -65,6 +66,15 @@ impl LogServer {
 
         // Initialize the internal logger so it can also write to files
         crate::utils::terminal_ui::set_internal_logger(writer_tx.clone(), sequence_counter.clone());
+
+        print_internal_log(
+            "INFO",
+            &self.name,
+            "log_server.rs",
+            "run",
+            "70",
+            &format!("{} : internal logger initialized - writer(s) ready !", self.name),
+        );
 
         // Start TCP server (always)
         let tcp_server = TcpServer::new(&self.config);
@@ -77,8 +87,9 @@ impl LogServer {
                     "ERROR",
                     tcp_server.name(),
                     "log_server.rs",
-                    "55",
-                    &format!("TCP server error: {e}"),
+                    "run",
+                    "86",
+                    &format!("{} : TCP server error: {e}", tcp_server.name()),
                 );
             }
         });
@@ -95,7 +106,8 @@ impl LogServer {
                         "ERROR",
                         grpc_server.name(),
                         "log_server.rs",
-                        "64",
+                        "run",
+                        "105",
                         &format!("gRPC server error: {e}"),
                     );
                 }
@@ -108,8 +120,9 @@ impl LogServer {
             "INFO",
             &self.name,
             "log_server.rs",
-            "71",
-            "all server components started",
+            "run",
+            "119",
+            &format!("{} : all server components started !", self.name),
         );
 
         // Wait for servers to complete

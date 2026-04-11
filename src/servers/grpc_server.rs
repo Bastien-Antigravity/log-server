@@ -64,7 +64,8 @@ impl GrpcServer {
             "INFO",
             &self.config.name,
             "grpc_server.rs",
-            "67",
+            "run",
+            "63",
             &format!("{} : gRPC server listening on {}", self.config.name, addr),
         );
 
@@ -134,7 +135,8 @@ impl LogService for GrpcLogServiceImpl {
                     "ERROR",
                     &self.name,
                     "grpc_server.rs",
-                    "137",
+                    "log_message",
+                    "134",
                     &format!(
                         "{client_id} : failed to process gRPC message: {e}",
                         client_id = client_id,

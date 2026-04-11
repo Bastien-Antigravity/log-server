@@ -110,13 +110,12 @@ impl LogWriter {
 
                 for _ in 0..batch_size {
                     if let Some(data) = buffer.remove(&current_sequence) {
-                        // Print to console with colors
-                        // Threshold updated to 73 (pre-level 63 + level 10)
-                        if data.len() > 73 {
-                            let level = data[63..73].trim();
-                            let colored_level = crate::utils::terminal_ui::colorize_level(level);
+                        // Threshold updated to 80 (pre-level 70 + level 10)
+                        if data.len() >= 80 {
+                            let level_part = data[70..80].trim();
+                            let colored_level = crate::utils::terminal_ui::colorize_level(level_part);
                             // Print to console with colors
-                            println!("{}{}{}", &data[..63], colored_level, &data[73..]);
+                            println!("{}{}{}", &data[..70], colored_level, &data[80..]);
                         } else {
                             println!("{data}");
                         }

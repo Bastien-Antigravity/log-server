@@ -49,7 +49,8 @@ impl TcpServer {
             "INFO",
             &self.config.name,
             "tcp_server.rs",
-            "52",
+            "run",
+            "48",
             &format!("{} : TCP server listening on {}", self.config.name, addr),
         );
 
@@ -69,7 +70,8 @@ impl TcpServer {
                         "ERROR",
                         &client_name,
                         "tcp_server.rs",
-                        "72",
+                        "run",
+                        "69",
                         &format!("{client_name} : connection handler failed: {e}"),
                     );
                 }
@@ -98,7 +100,8 @@ impl TcpServer {
             "INFO",
             name,
             "tcp_server.rs",
-            "101",
+            "handle_tcp_connection",
+            "99",
             &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
@@ -110,7 +113,8 @@ impl TcpServer {
                     "INFO",
                     name,
                     "tcp_server.rs",
-                    "113",
+                    "handle_tcp_connection",
+                    "112",
                     &format!("{name} : TCP connection has been closed from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
                 );
                 break;
@@ -126,6 +130,7 @@ impl TcpServer {
                     "ERROR",
                     name,
                     "tcp_server.rs",
+                    "handle_tcp_connection",
                     "129",
                     &format!("{name} : message handling failed: {e}"),
                 );
