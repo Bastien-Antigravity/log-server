@@ -116,7 +116,7 @@ impl LogService for GrpcLogServiceImpl {
         let remote_addr = request.remote_addr();
         let client_id = match remote_addr {
             Some(addr) => format!("grpc_client_{}", addr),
-            None => format!("grpc_client_unknown"),
+            None => "grpc_client_unknown".to_string(),
         };
         let log_data = request.into_inner();
 
