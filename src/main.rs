@@ -3,7 +3,6 @@
 //! Centralized logging server that handles both TCP socket (Cap'n Proto)
 //! and gRPC log messages with ordered file writing and rotation.
 
-
 use log_server::core::log_server::LogServer;
 use log_server::utils::terminal_ui::print_internal_log;
 
@@ -19,10 +18,14 @@ fn main() {
 
     let name = ac.cli_args.name.as_deref().unwrap_or("log-server");
     let default_host = ac.cli_args.host.as_deref().unwrap_or("127.0.0.1");
-    let listen_addr = ac.get_listen_addr(name).unwrap_or_else(|_| format!("{}:9020", default_host));
-    
+    let listen_addr = ac
+        .get_listen_addr(name)
+        .unwrap_or_else(|_| format!("{}:9020", default_host));
+
     let default_grpc_host = ac.cli_args.grpc_host.as_deref().unwrap_or(default_host);
-    let grpc_listen_addr = ac.get_grpc_listen_addr(name).unwrap_or_else(|_| format!("{}:9021", default_grpc_host));
+    let grpc_listen_addr = ac
+        .get_grpc_listen_addr(name)
+        .unwrap_or_else(|_| format!("{}:9021", default_grpc_host));
     let enable_grpc = true;
 
     // Parse host and port from listen_addr
@@ -39,11 +42,18 @@ fn main() {
         name,
         "main.rs",
         "main",
-        "37",
+        "40",
         &format!("{name} : starting log server"),
     );
     if enable_grpc {
-        print_internal_log("INFO", name, "main.rs", "main", "46", &format!("{name} : gRPC server enabled"));
+        print_internal_log(
+            "INFO",
+            name,
+            "main.rs",
+            "main",
+            "49",
+            &format!("{name} : gRPC server enabled"),
+        );
     }
 
     // Run the server
@@ -53,7 +63,7 @@ fn main() {
             name,
             "main.rs",
             "main",
-            "51",
+            "61",
             &format!("{name} : server starting failed - {e}"),
         );
         std::process::exit(1);

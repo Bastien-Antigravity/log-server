@@ -30,7 +30,7 @@ impl SafeSocketReader {
             // big-endian u32 length prefix
             let mut length_buf = [0u8; 4];
             let n = self.reader.read_exact(&mut length_buf).await;
-            
+
             if let Err(e) = n {
                 if e.kind() == io::ErrorKind::UnexpectedEof {
                     return Ok(None);
@@ -39,14 +39,14 @@ impl SafeSocketReader {
             }
 
             let slen = u32::from_be_bytes(length_buf) as usize;
-            
+
             // HEARTBEAT: If length is 0, skip and wait for next frame
             if slen == 0 {
                 continue;
             }
 
             let mut chunk = BytesMut::with_capacity(slen);
-            
+
             // Read exactly slen bytes
             while chunk.len() < slen {
                 let remaining = slen - chunk.len();
@@ -108,8 +108,8 @@ impl SafeSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::TcpListener;
     use tokio::io::AsyncWriteExt;
+    use tokio::net::TcpListener;
 
     #[tokio::test]
     async fn test_heartbeat_skip() {
@@ -118,13 +118,16 @@ mod tests {
 
         let server_task = tokio::spawn(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
-            
+
             // Send Heartbeat (4 bytes of 0)
             socket.write_all(&0u32.to_be_bytes()).await.unwrap();
-            
+
             // Send Data Frame (4 bytes len + "HELLO")
             let msg = b"HELLO";
-            socket.write_all(&(msg.len() as u32).to_be_bytes()).await.unwrap();
+            socket
+                .write_all(&(msg.len() as u32).to_be_bytes())
+                .await
+                .unwrap();
             socket.write_all(msg).await.unwrap();
         });
 

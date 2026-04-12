@@ -73,7 +73,10 @@ impl LogServer {
             "log_server.rs",
             "run",
             "70",
-            &format!("{} : internal logger initialized - writer(s) ready !", self.name),
+            &format!(
+                "{} : internal logger initialized - writer(s) ready !",
+                self.name
+            ),
         );
 
         // Start TCP server (always)
@@ -88,7 +91,7 @@ impl LogServer {
                     tcp_server.name(),
                     "log_server.rs",
                     "run",
-                    "86",
+                    "89",
                     &format!("{} : TCP server error: {e}", tcp_server.name()),
                 );
             }
@@ -107,7 +110,7 @@ impl LogServer {
                         grpc_server.name(),
                         "log_server.rs",
                         "run",
-                        "105",
+                        "108",
                         &format!("gRPC server error: {e}"),
                     );
                 }
@@ -121,7 +124,7 @@ impl LogServer {
             &self.name,
             "log_server.rs",
             "run",
-            "119",
+            "122",
             &format!("{} : all server components started !", self.name),
         );
 

@@ -58,7 +58,13 @@ pub fn print_internal_log(
         function_name,
         line,
         message,
-        "", "", "", "", "", "", "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
     );
 
     // 2. Direct console output with functional coloring (only if writer not yet active)

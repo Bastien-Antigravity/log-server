@@ -103,7 +103,7 @@ impl TcpServer {
             name,
             "tcp_server.rs",
             "handle_tcp_connection",
-            "99",
+            "101",
             &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
@@ -114,13 +114,15 @@ impl TcpServer {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 if let Err(e) = writer.send_heartbeat().await {
                     // Only log if it's not a closed connection error
-                    if e.kind() != tokio::io::ErrorKind::BrokenPipe && e.kind() != tokio::io::ErrorKind::ConnectionAborted {
+                    if e.kind() != tokio::io::ErrorKind::BrokenPipe
+                        && e.kind() != tokio::io::ErrorKind::ConnectionAborted
+                    {
                         print_internal_log(
                             "DEBUG",
                             &client_name,
                             "tcp_server.rs",
                             "heartbeat_task",
-                            "110",
+                            "120",
                             &format!("Heartbeat failed for {client_name}: {e}"),
                         );
                     }
@@ -138,7 +140,7 @@ impl TcpServer {
                     name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
-                    "112",
+                    "138",
                     &format!("{name} : TCP connection has been closed from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
                 );
                 break;
@@ -155,7 +157,7 @@ impl TcpServer {
                     name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
-                    "129",
+                    "155",
                     &format!("{name} : message handling failed: {e}"),
                 );
                 break;

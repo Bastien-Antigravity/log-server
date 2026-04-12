@@ -56,7 +56,9 @@ pub fn get_exec_parent_dir() -> PathBuf {
 
 /// Get current UTC timestamp as string
 pub fn get_utc_timestamp() -> String {
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string()
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.9fZ")
+        .to_string()
 }
 
 //-----------------------------------------------------------------------------------------------

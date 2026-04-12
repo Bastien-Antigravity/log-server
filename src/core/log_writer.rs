@@ -113,7 +113,8 @@ impl LogWriter {
                         // Threshold updated to 80 (pre-level 70 + level 10)
                         if data.len() >= 80 {
                             let level_part = data[70..80].trim();
-                            let colored_level = crate::utils::terminal_ui::colorize_level(level_part);
+                            let colored_level =
+                                crate::utils::terminal_ui::colorize_level(level_part);
                             // Print to console with colors
                             println!("{}{}{}", &data[..70], colored_level, &data[80..]);
                         } else {
