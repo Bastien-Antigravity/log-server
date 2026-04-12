@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_tcp_message;
-use crate::transport::safe_socket::SafeSocket;
+use crate::transport::safe_socket::{SafeSocket, SafeSocketWriter};
 use crate::utils::terminal_ui::print_internal_log;
 
 /// TCP server for Cap'n Proto log messages
@@ -95,7 +95,9 @@ impl TcpServer {
         let local_ip = local_addr.ip();
         let local_port = local_addr.port();
 
-        let mut safe_socket = SafeSocket::new(socket);
+        let safe_socket = SafeSocket::new(socket);
+        let (mut reader, mut writer) = safe_socket.split();
+
         print_internal_log(
             "INFO",
             name,
@@ -105,8 +107,30 @@ impl TcpServer {
             &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
+        // Spawn background heartbeat task (every 10 seconds)
+        let client_name = format!("{name}_{peer_ip}_{peer_port}");
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                if let Err(e) = writer.send_heartbeat().await {
+                    // Only log if it's not a closed connection error
+                    if e.kind() != tokio::io::ErrorKind::BrokenPipe && e.kind() != tokio::io::ErrorKind::ConnectionAborted {
+                        print_internal_log(
+                            "DEBUG",
+                            &client_name,
+                            "tcp_server.rs",
+                            "heartbeat_task",
+                            "110",
+                            &format!("Heartbeat failed for {client_name}: {e}"),
+                        );
+                    }
+                    break;
+                }
+            }
+        });
+
         loop {
-            let bytes_read = safe_socket.receive_data().await?;
+            let bytes_read = reader.receive_data().await?;
 
             if bytes_read.is_none() {
                 print_internal_log(
