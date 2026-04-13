@@ -85,3 +85,4 @@ zzz_memo
 
 # Ignore pickle files
 *.pkl
+*.exe
