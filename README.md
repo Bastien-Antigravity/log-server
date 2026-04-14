@@ -10,7 +10,7 @@ A high-performance, centralized logging server written in Rust that handles both
 - **Async Architecture**: Built on Tokio for high-performance concurrent operations
 - **Dynamic Batching**: Automatically adjusts batch sizes based on message volume
 - **Retry Logic**: Implements retry mechanisms for robust write operations.
-- **Optional gRPC Support**: Runs in TCP-only mode by default; gRPC can be enabled via flag
+- **Integrated gRPC Support**: Runs both TCP and gRPC server components concurrently.
 
 ## Architecture
 
@@ -88,21 +88,18 @@ docker run -d -p 9020:9020 -v $(pwd)/logs:/log-server/logs log-server
 ./log-server
 
 # Start with custom configuration
-./log-server --name MyLogServer --host 0.0.0.0 --port 9020 --grpc_port 9021
-
-# Start with gRPC enabled
-./log-server --enable_grpc
+./log-server --name MyLogServer --host 0.0.0.0
 ```
 
 ### Command-Line Options
+
+Note: Full configuration uses the standard `microservice-toolbox` address resolution, taking precedence via the `.env` or process environment variables if defined.
 
 | Option          | Default      | Description                            |
 |-----------------|--------------|----------------------------------------|
 | `--name`        | `log-server` | Server instance name                   |
 | `--host`        | `127.0.0.1`  | Host address to bind to                |
-| `--port`        | `9020`       | TCP server port                        |
-| `--grpc_port`   | `9021`       | gRPC server port                       |
-| `--enable_grpc` | `false`      | Enable gRPC server (default: TCP only) |
+| `--grpc_host`   | `127.0.0.1`  | Host address for gRPC to bind to       |
 
 ## Message Format
 
@@ -196,12 +193,12 @@ enum Level {
 Log messages are formatted with fixed-width columns for readability:
 
 ```
-<sequence> <timestamp> <hostname> <logger_name> <level> <filename> <function_name> <line_number> <message>
+<timestamp> <hostname> <logger_name> <level> <filename> <function_name> <line_number> <message>
 ```
 
 Example:
 ```
-0 2025-01-15T10:30:45.123Z  myhost       app_logger      INFO     main.py              process_data              42     Processing started
+2025-01-15T10:30:45.123Z  myhost       app_logger      INFO     main.py              process_data              42     Processing started
 ```
 
 ## Configuration
@@ -282,12 +279,14 @@ The server handles various error conditions:
 
 Server operational logs are printed to stdout/stderr:
 
-```
-LogServer : starting log server
-LogServer : starting server components
-LogServer : TCP server listening on 127.0.0.1:9020
-LogServer : gRPC server listening on 127.0.0.1:9021
-LogServer : all server components started
+```text
+2026-04-14T10:30:45.123456789Z myhost       log-server             INFO  main.rs              main                      40     log-server : starting log server [metadata: mod=log-server]
+2026-04-14T10:30:45.124456789Z myhost       log-server             INFO  main.rs              main                      49     log-server : gRPC server enabled [metadata: mod=log-server]
+2026-04-14T10:30:45.125456789Z myhost       log-server             INFO  log_server.rs        run                       52     log-server : starting server components. .  . [metadata: mod=log-server]
+2026-04-14T10:30:45.126456789Z myhost       log-server             INFO  log_server.rs        run                       70     log-server : internal logger initialized - writer(s) ready ! [metadata: mod=log-server]
+2026-04-14T10:30:45.127456789Z myhost       log-server             INFO  tcp_server.rs        run                       48     log-server : TCP server listening on 127.0.0.1:9020 [metadata: mod=log-server]
+2026-04-14T10:30:45.128456789Z myhost       log-server             INFO  grpc_server.rs       run                       63     log-server : gRPC server listening on 127.0.0.1:9021 [metadata: mod=log-server]
+2026-04-14T10:30:45.129456789Z myhost       log-server             INFO  log_server.rs        run                       122    log-server : all server components started ! [metadata: mod=log-server]
 ```
 
 ## Development
@@ -322,11 +321,18 @@ cargo clippy
 
 The Log Server includes a robust testing infrastructure covering both isolated logic and full system integration.
 
-### Core Features Tested
+### What is tested
 - **Log Formatting**: Validates fixed-width column alignment, Logfmt metadata serialization, and string truncation.
 - **Protocol Handlers**: Verifies correct mapping from Cap'n Proto and gRPC messages to the internal `LogEntry` model.
 - **Global Sequencing**: Ensures messages from multiple protocols (TCP/gRPC) share a single, strictly ordered sequence.
 - **System Resilience**: Confirms the `LogWriter` handles directory creation and file rotation safely.
+- **Microservice Configuration**: Validates environment/CLI argument parsing.
+- **Full Integration**: End-to-end testing from TCP/gRPC clients to the physical log file.
+
+### What is not tested yet
+- **Extreme Concurrency / Load Testing**: Benchmarks under massive simultaneous client load are not yet automated.
+- **Network Resilience / Reconnection**: Drop connections or half-open states edge cases are not fully tested.
+- **Malformed Message Resilience**: Deep fuzzing of incoming byte streams for Cap'n Proto / gRPC invalid payloads.
 
 ### Test Categories
 
