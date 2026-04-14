@@ -193,12 +193,12 @@ enum Level {
 Log messages are formatted with fixed-width columns for readability:
 
 ```
-<sequence> <timestamp> <hostname> <logger_name> <level> <filename> <function_name> <line_number> <message>
+<timestamp> <hostname> <logger_name> <level> <filename> <function_name> <line_number> <message>
 ```
 
 Example:
 ```
-0 2025-01-15T10:30:45.123Z  myhost       app_logger      INFO     main.py              process_data              42     Processing started
+2025-01-15T10:30:45.123Z  myhost       app_logger      INFO     main.py              process_data              42     Processing started
 ```
 
 ## Configuration
