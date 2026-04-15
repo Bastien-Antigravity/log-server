@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_tcp_message;
+use crate::line_str;
 use crate::transport::safe_socket::SafeSocket;
 use crate::utils::terminal_ui::print_internal_log;
 
@@ -50,7 +51,7 @@ impl TcpServer {
             &self.config.name,
             "tcp_server.rs",
             "run",
-            "48",
+            line_str!(),
             &format!("{} : TCP server listening on {}", self.config.name, addr),
         );
 
@@ -71,7 +72,7 @@ impl TcpServer {
                         &client_name,
                         "tcp_server.rs",
                         "run",
-                        "69",
+                        line_str!(),
                         &format!("{client_name} : connection handler failed: {e}"),
                     );
                 }
@@ -103,7 +104,7 @@ impl TcpServer {
             name,
             "tcp_server.rs",
             "handle_tcp_connection",
-            "101",
+            line_str!(),
             &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
@@ -122,7 +123,7 @@ impl TcpServer {
                             &client_name,
                             "tcp_server.rs",
                             "heartbeat_task",
-                            "120",
+                            line_str!(),
                             &format!("Heartbeat failed for {client_name}: {e}"),
                         );
                     }
@@ -140,7 +141,7 @@ impl TcpServer {
                     name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
-                    "138",
+                    line_str!(),
                     &format!("{name} : TCP connection has been closed from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
                 );
                 break;
@@ -157,7 +158,7 @@ impl TcpServer {
                     name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
-                    "155",
+                    line_str!(),
                     &format!("{name} : message handling failed: {e}"),
                 );
                 break;

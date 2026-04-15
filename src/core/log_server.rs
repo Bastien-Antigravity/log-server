@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crate::config::config::Config;
 use crate::core::log_writer::LogWriter;
+use crate::line_str;
 use crate::servers::grpc_server::GrpcServer;
 use crate::servers::tcp_server::TcpServer;
 use crate::utils::terminal_ui::print_internal_log;
@@ -54,7 +55,7 @@ impl LogServer {
             &self.name,
             "log_server.rs",
             "run",
-            "52",
+            line_str!(),
             &format!("{} : starting server components. .  .", self.name),
         );
 
@@ -72,7 +73,7 @@ impl LogServer {
             &self.name,
             "log_server.rs",
             "run",
-            "70",
+            line_str!(),
             &format!(
                 "{} : internal logger initialized - writer(s) ready !",
                 self.name
@@ -91,7 +92,7 @@ impl LogServer {
                     tcp_server.name(),
                     "log_server.rs",
                     "run",
-                    "89",
+                    line_str!(),
                     &format!("{} : TCP server error: {e}", tcp_server.name()),
                 );
             }
@@ -110,7 +111,7 @@ impl LogServer {
                         grpc_server.name(),
                         "log_server.rs",
                         "run",
-                        "108",
+                        line_str!(),
                         &format!("gRPC server error: {e}"),
                     );
                 }
@@ -124,7 +125,7 @@ impl LogServer {
             &self.name,
             "log_server.rs",
             "run",
-            "122",
+            line_str!(),
             &format!("{} : all server components started !", self.name),
         );
 

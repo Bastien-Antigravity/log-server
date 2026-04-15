@@ -9,6 +9,7 @@ use tonic::{transport::Server, Request, Response, Status};
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_grpc_message;
+use crate::line_str;
 use crate::models::log_entry::LogEntry;
 use crate::utils::terminal_ui::print_internal_log;
 
@@ -65,7 +66,7 @@ impl GrpcServer {
             &self.config.name,
             "grpc_server.rs",
             "run",
-            "63",
+            line_str!(),
             &format!("{} : gRPC server listening on {}", self.config.name, addr),
         );
 
@@ -136,7 +137,7 @@ impl LogService for GrpcLogServiceImpl {
                     &self.name,
                     "grpc_server.rs",
                     "log_message",
-                    "134",
+                    line_str!(),
                     &format!(
                         "{client_id} : failed to process gRPC message: {e}",
                         client_id = client_id,
