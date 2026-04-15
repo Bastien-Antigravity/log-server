@@ -9,9 +9,9 @@ use tonic::{transport::Server, Request, Response, Status};
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_grpc_message;
+use crate::line_str;
 use crate::models::log_entry::LogEntry;
 use crate::utils::terminal_ui::print_internal_log;
-use crate::line_str;
 
 // Add this line - it includes the generated gRPC code
 pub mod log_service {

@@ -7,9 +7,9 @@ use tokio::sync::mpsc;
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_tcp_message;
+use crate::line_str;
 use crate::transport::safe_socket::SafeSocket;
 use crate::utils::terminal_ui::print_internal_log;
-use crate::line_str;
 
 /// TCP server for Cap'n Proto log messages
 pub struct TcpServer {

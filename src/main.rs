@@ -4,8 +4,8 @@
 //! and gRPC log messages with ordered file writing and rotation.
 
 use log_server::core::log_server::LogServer;
-use log_server::utils::terminal_ui::print_internal_log;
 use log_server::line_str;
+use log_server::utils::terminal_ui::print_internal_log;
 
 //================================================================
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
     };
 
     let name = ac.cli_args.name.as_deref().unwrap_or("log-server");
-    
+
     let default_host = ac.cli_args.host.as_deref().unwrap_or("127.0.0.1");
     let default_port = ac.cli_args.port.unwrap_or(9020);
     let listen_addr = ac

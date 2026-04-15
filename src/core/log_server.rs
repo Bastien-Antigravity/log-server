@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use crate::config::config::Config;
 use crate::core::log_writer::LogWriter;
+use crate::line_str;
 use crate::servers::grpc_server::GrpcServer;
 use crate::servers::tcp_server::TcpServer;
 use crate::utils::terminal_ui::print_internal_log;
-use crate::line_str;
 
 /// Main log server orchestrator
 pub struct LogServer {
