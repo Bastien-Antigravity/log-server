@@ -8,6 +8,7 @@ use log_server::line_str;
 use log_server::utils::terminal_ui::print_internal_log;
 
 //================================================================
+
 fn main() {
     let ac = match microservice_toolbox::config::load_config("standalone") {
         Ok(ac) => ac,
@@ -77,6 +78,7 @@ fn main() {
 }
 
 //-----------------------------------------------------------------------------------------------
+
 /// Main server execution function
 fn run_server(
     name: &str,
