@@ -99,7 +99,9 @@ Note: Full configuration uses the standard `microservice-toolbox` address resolu
 |-----------------|--------------|----------------------------------------|
 | `--name`        | `log-server` | Server instance name                   |
 | `--host`        | `127.0.0.1`  | Host address to bind to                |
-| `--grpc_host`   | `127.0.0.1`  | Host address for gRPC to bind to       |
+| `--port`        | `1234     `  | Port number to bind to                 |
+| `--grpc_host`   | `127.0.0.2`  | Host address for gRPC to bind to       |
+| `--grpc_port`   | `2345`       | Port number for gRPC to bind to        |
 
 ## Message Format
 
