@@ -5,6 +5,7 @@
 
 use log_server::core::log_server::LogServer;
 use log_server::utils::terminal_ui::print_internal_log;
+use log_server::line_str;
 
 //================================================================
 fn main() {
@@ -17,41 +18,46 @@ fn main() {
     };
 
     let name = ac.cli_args.name.as_deref().unwrap_or("log-server");
+    
     let default_host = ac.cli_args.host.as_deref().unwrap_or("127.0.0.1");
+    let default_port = ac.cli_args.port.unwrap_or(9020);
     let listen_addr = ac
         .get_listen_addr(name)
-        .unwrap_or_else(|_| format!("{}:9020", default_host));
+        .unwrap_or_else(|_| format!("{}:{}", default_host, default_port));
 
     let default_grpc_host = ac.cli_args.grpc_host.as_deref().unwrap_or(default_host);
+    let default_grpc_port = ac.cli_args.grpc_port.unwrap_or(default_port + 1);
     let grpc_listen_addr = ac
         .get_grpc_listen_addr(name)
-        .unwrap_or_else(|_| format!("{}:9021", default_grpc_host));
+        .unwrap_or_else(|_| format!("{}:{}", default_grpc_host, default_grpc_port));
+
     let enable_grpc = true;
 
     // Parse host and port from listen_addr
     let addr_parts: Vec<&str> = listen_addr.split(':').collect();
     let host = addr_parts[0];
-    let port = addr_parts[1].parse::<u16>().unwrap_or(9020);
+    let port = addr_parts[1].parse::<u16>().unwrap_or(default_port);
 
     // Parse grpc_port from grpc_listen_addr
     let grpc_parts: Vec<&str> = grpc_listen_addr.split(':').collect();
-    let grpc_port = grpc_parts[1].parse::<u16>().unwrap_or(9021);
+    let grpc_port = grpc_parts[1].parse::<u16>().unwrap_or(default_grpc_port);
 
     print_internal_log(
         "INFO",
         name,
         "main.rs",
         "main",
-        "40",
+        line_str!(),
         &format!("{name} : starting log server"),
     );
+
     if enable_grpc {
         print_internal_log(
             "INFO",
             name,
             "main.rs",
             "main",
-            "49",
+            line_str!(),
             &format!("{name} : gRPC server enabled"),
         );
     }
@@ -63,7 +69,7 @@ fn main() {
             name,
             "main.rs",
             "main",
-            "61",
+            line_str!(),
             &format!("{name} : server starting failed - {e}"),
         );
         std::process::exit(1);

@@ -4,6 +4,17 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
+
+//-----------------------------------------------------------------------------------------------
+
+/// For line!() formatting
+#[macro_export]
+macro_rules! line_str {
+    () => { &line!().to_string() };
+}
+
+//-----------------------------------------------------------------------------------------------
+
 /// Get system hostname (cached)
 pub fn get_hostname() -> &'static str {
     static HOSTNAME: OnceLock<String> = OnceLock::new();
