@@ -1,3 +1,13 @@
+---
+microservice: log-server
+type: repository
+status: active
+language: rust
+tags:
+  - domain/observability
+  - domain/networking
+---
+
 # Log Server
 
 A high-performance, centralized logging server written in Rust that handles both TCP (Cap'n Proto) and gRPC log messages with ordered file writing and automatic rotation.

@@ -1,3 +1,12 @@
+---
+microservice: log-server
+type: architecture
+status: active
+tags:
+  - domain/observability
+  - domain/networking
+---
+
 # Log Server Architecture
 
 This document describes the data flow and component hierarchy of the Log Server.
