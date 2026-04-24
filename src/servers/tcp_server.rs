@@ -6,7 +6,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
 use crate::config::config::Config;
-use crate::core::protocol_handlers::handle_tcp_message;
+use crate::core::protocol_handlers::{handle_tcp_message, identify_client_from_handshake};
 use crate::line_str;
 use crate::transport::safe_socket::SafeSocket;
 use crate::utils::terminal_ui::print_internal_log;
@@ -108,8 +108,36 @@ impl TcpServer {
             &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
+        // 1. Initial Handshake / Identity Detection (Hybrid Protocol)
+        let first_bytes = reader.receive_data().await?;
+        let mut actual_client_name = format!("{name}_{peer_ip}_{peer_port}");
+        let mut first_log_data = None;
+
+        if let Some(data) = first_bytes {
+            // Unpacked Cap'n Proto messages (like HelloMsg) start with segment count 0 (4 zero bytes)
+            if data.len() >= 4 && &data[0..4] == &[0, 0, 0, 0] {
+                if let Ok(identity) = identify_client_from_handshake(&data) {
+                    actual_client_name = format!("{name}_{identity}");
+                    print_internal_log(
+                        "INFO",
+                        name,
+                        "tcp_server.rs",
+                        "handle_tcp_connection",
+                        line_str!(),
+                        &format!("{name} : client identified via handshake as '{identity}'"),
+                    );
+                } else {
+                    // Not a valid handshake, assume it's data
+                    first_log_data = Some(data.to_vec());
+                }
+            } else {
+                // Packed message or unknown -> assume first log message
+                first_log_data = Some(data.to_vec());
+            }
+        }
+
         // Spawn background heartbeat task (every 10 seconds)
-        let client_name = format!("{name}_{peer_ip}_{peer_port}");
+        let heartbeat_client_name = actual_client_name.clone();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -120,11 +148,11 @@ impl TcpServer {
                     {
                         print_internal_log(
                             "DEBUG",
-                            &client_name,
+                            &heartbeat_client_name,
                             "tcp_server.rs",
                             "heartbeat_task",
                             line_str!(),
-                            &format!("Heartbeat failed for {client_name}: {e}"),
+                            &format!("Heartbeat failed for {heartbeat_client_name}: {e}"),
                         );
                     }
                     break;
@@ -132,34 +160,51 @@ impl TcpServer {
             }
         });
 
+        // 2. Process first log if it was already read
+        if let Some(data) = first_log_data {
+            if let Err(e) =
+                handle_tcp_message(data, writer_tx.clone(), sequence_counter.clone(), &actual_client_name).await
+            {
+                print_internal_log(
+                    "ERROR",
+                    &actual_client_name,
+                    "tcp_server.rs",
+                    "handle_tcp_connection",
+                    line_str!(),
+                    &format!("{actual_client_name} : initial message handling failed: {e}"),
+                );
+                return Ok(());
+            }
+        }
+
+        // 3. Main Message Loop
         loop {
             let bytes_read = reader.receive_data().await?;
 
             if bytes_read.is_none() {
                 print_internal_log(
                     "INFO",
-                    name,
+                    &actual_client_name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
                     line_str!(),
-                    &format!("{name} : TCP connection has been closed from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
+                    &format!("{actual_client_name} : TCP connection has been closed"),
                 );
                 break;
             }
 
             let data = bytes_read.unwrap().to_vec();
 
-            // Connection closed, or corrupted message -> close connection, client socket have to manage reconnection
             if let Err(e) =
-                handle_tcp_message(data, writer_tx.clone(), sequence_counter.clone(), name).await
+                handle_tcp_message(data, writer_tx.clone(), sequence_counter.clone(), &actual_client_name).await
             {
                 print_internal_log(
                     "ERROR",
-                    name,
+                    &actual_client_name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
                     line_str!(),
-                    &format!("{name} : message handling failed: {e}"),
+                    &format!("{actual_client_name} : message handling failed: {e}"),
                 );
                 break;
             }

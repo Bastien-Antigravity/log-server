@@ -2,7 +2,7 @@
 //!
 //! Handles Cap'n Proto deserialization and message mapping to internal models.
 
-use capnp::{message::ReaderOptions, serialize_packed};
+use capnp::{message::ReaderOptions, serialize, serialize_packed};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -14,6 +14,30 @@ use crate::models::log_entry::{LogEntry, LEVEL_STRINGS};
 #[rustfmt::skip]
 mod capnp_protocol {
     include!("../protocols/capnp/logger_msg.rs");
+}
+
+/// Identify client from SafeSocket Hello handshake (Unpacked Cap'n Proto)
+/// This uses a "Layout Hack" by abusing the LoggerMsg reader, since both structs 
+/// start with Text fields at indices 0 and 1.
+pub fn identify_client_from_handshake(data: &[u8]) -> Result<String, String> {
+    // Note: Handshake is UNPACKED, so we use serialize::read_message
+    let reader = serialize::read_message(&mut &data[..], ReaderOptions::new())
+        .map_err(|e| format!("handshake read failed: {e}"))?;
+    
+    let hello_as_log = reader.get_root::<capnp_protocol::logger_msg::Reader<'_>>()
+        .map_err(|e| format!("handshake root failed: {e}"))?;
+    
+    // @0 timestamp (LoggerMsg) -> @0 fromName (HelloMsg)
+    let from_name = hello_as_log.get_timestamp()
+        .map_err(|e| format!("get fromName failed: {e}"))?;
+        
+    // @1 hostname (LoggerMsg) -> @1 fromHost (HelloMsg)
+    let from_host = hello_as_log.get_hostname()
+        .map_err(|e| format!("get fromHost failed: {e}"))?;
+        
+    Ok(format!("{}@{}", 
+        from_name.to_str().map_err(|e| e.to_string())?, 
+        from_host.to_str().map_err(|e| e.to_string())?))
 }
 
 //-----------------------------------------------------------------------------------------------
