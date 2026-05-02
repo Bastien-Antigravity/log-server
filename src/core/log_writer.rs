@@ -20,6 +20,7 @@ pub struct WriterConfig {
     pub retry_delay_ms: u64,
     pub max_file_bytes: u64,
     pub backup_count: usize,
+    pub gap_timeout_ms: u64,
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -33,6 +34,7 @@ impl Default for WriterConfig {
             retry_delay_ms: 100,
             max_file_bytes: 1024 * 1024, // 1 MB
             backup_count: 10,
+            gap_timeout_ms: 500,
         }
     }
 }
@@ -42,14 +44,19 @@ impl Default for WriterConfig {
 /// File writer with ordering and rotation
 pub struct LogWriter {
     config: WriterConfig,
-    base_file_path: PathBuf,
+    pub(crate) base_file_path: PathBuf,
 }
 
 //-----------------------------------------------------------------------------------------------
 
 impl LogWriter {
-    /// Create new log writer
+    /// Create new log writer with default config
     pub async fn new() -> Result<Self, std::io::Error> {
+        Self::with_config(WriterConfig::default()).await
+    }
+
+    /// Create new log writer with custom config
+    pub async fn with_config(config: WriterConfig) -> Result<Self, std::io::Error> {
         let log_dir = crate::utils::helpers::get_exec_parent_dir().join("logs");
 
         // Ensure log directory exists
@@ -60,7 +67,7 @@ impl LogWriter {
         let base_file_path = log_dir.join("_main.log");
 
         Ok(Self {
-            config: WriterConfig::default(),
+            config,
             base_file_path,
         })
     }
@@ -95,52 +102,76 @@ impl LogWriter {
         let mut buffer: BTreeMap<u64, String> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
         let mut batch_size = config.initial_batch_size;
+        let mut gap_timer = tokio::time::interval(Duration::from_millis(config.gap_timeout_ms));
 
-        while let Some(message) = rx.recv().await {
-            // Parse sequence number and message
-            if let Some((seq_str, log_data)) = message.split_once(' ') {
-                if let Ok(sequence) = seq_str.parse::<u64>() {
-                    buffer.insert(sequence, log_data.to_string());
+        loop {
+            tokio::select! {
+                // Branch 1: Incoming messages
+                Some(message) = rx.recv() => {
+                    // Parse sequence number and message
+                    if let Some((seq_str, log_data)) = message.split_once(' ') {
+                        if let Ok(sequence) = seq_str.parse::<u64>() {
+                            buffer.insert(sequence, log_data.to_string());
+                        }
+                    }
                 }
+
+                // Branch 2: Gap Timeout / Periodic Flush
+                _ = gap_timer.tick() => {
+                    if !buffer.is_empty() && !buffer.contains_key(&current_sequence) {
+                        let next_available = *buffer.keys().next().unwrap();
+                        if next_available > current_sequence {
+                            eprintln!("[SEQUENCE_GAP_WARNING] Skipping from {} to {} due to timeout", 
+                                current_sequence, next_available);
+                            current_sequence = next_available;
+                        }
+                    }
+                }
+                
+                // Shutdown condition
+                else => break,
             }
 
-            // Process batch if ready
-            while buffer.len() >= batch_size || buffer.contains_key(&current_sequence) {
+            // Process buffer if current_sequence is ready or buffer is too full
+            while buffer.contains_key(&current_sequence) || buffer.len() >= batch_size {
                 let mut batch = Vec::new();
 
-                for _ in 0..batch_size {
-                    if let Some(data) = buffer.remove(&current_sequence) {
-                        // Threshold updated to 80 (pre-level 70 + level 10)
-                        if data.len() >= 80 {
-                            let level_part = data[70..80].trim();
-                            let colored_level =
-                                crate::utils::terminal_ui::colorize_level(level_part);
-                            // Print to console with colors
-                            println!("{}{}{}", &data[..70], colored_level, &data[80..]);
-                        } else {
-                            println!("{data}");
-                        }
+                // If we hit batch_size but don't have current_sequence, we must force progress
+                if !buffer.contains_key(&current_sequence) && buffer.len() >= batch_size {
+                    let next_available = *buffer.keys().next().unwrap();
+                    eprintln!("[BUFFER_FULL_WARNING] Forcing progress to {} due to buffer pressure", next_available);
+                    current_sequence = next_available;
+                }
 
-                        batch.push(data);
-                        current_sequence += 1;
+                while let Some(data) = buffer.remove(&current_sequence) {
+                    // Threshold updated to 80 (pre-level 70 + level 10)
+                    if data.len() >= 80 {
+                        let level_part = data[70..80].trim();
+                        let colored_level = crate::utils::terminal_ui::colorize_level(level_part);
+                        println!("{}{}{}", &data[..70], colored_level, &data[80..]);
                     } else {
-                        break;
+                        println!("{data}");
                     }
+
+                    batch.push(data);
+                    current_sequence += 1;
+                    
+                    if batch.len() >= batch_size { break; }
                 }
 
                 if !batch.is_empty() {
                     Self::write_batch(&mut file, &mut file_size, &batch, &config).await?;
 
-                    // Rotate file if size exceeds limit
                     if file_size >= config.max_file_bytes {
                         file.flush().await?;
                         Self::rotate_files(&base_file_path, config.backup_count).await?;
                         file = File::create(&base_file_path).await?;
                         file_size = 0;
                     }
-
                     file.flush().await?;
                 }
+                
+                if buffer.is_empty() { break; }
             }
 
             // Adjust batch size dynamically
