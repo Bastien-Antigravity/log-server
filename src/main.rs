@@ -20,7 +20,7 @@ fn main() {
 
     let name = ac.cli_args.name.as_deref().unwrap_or("log-server");
 
-    let default_host = ac.cli_args.host.as_deref().unwrap_or("127.0.0.1");
+    let default_host = ac.cli_args.host.as_deref().unwrap_or("0.0.0.0");
     let default_port = ac.cli_args.port.unwrap_or(9020);
     let listen_addr = ac
         .get_listen_addr(name)
