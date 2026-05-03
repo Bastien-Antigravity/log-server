@@ -125,7 +125,7 @@ impl TcpServer {
 
         if let Some(data) = first_bytes {
             // Unpacked Cap'n Proto messages (like HelloMsg) start with segment count 0 (4 zero bytes)
-            if data.len() >= 4 && &data[0..4] == &[0, 0, 0, 0] {
+            if data.len() >= 4 && data[0..4] == [0, 0, 0, 0] {
                 if let Ok(identity) = identify_client_from_handshake(&data) {
                     actual_client_name = format!("{name}_{identity}");
                     print_internal_log(

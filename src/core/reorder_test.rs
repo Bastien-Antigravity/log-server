@@ -9,8 +9,10 @@ mod tests {
     #[tokio::test]
     async fn test_gap_timeout_recovery() {
         // 1. Setup writer with a short timeout for the test
-        let mut config = WriterConfig::default();
-        config.gap_timeout_ms = 100; // 100ms for fast testing
+        let config = WriterConfig {
+            gap_timeout_ms: 100,
+            ..WriterConfig::default()
+        };
 
         let writer = LogWriter::with_config(config).await.unwrap();
         // Override config for the test (we need to expose config or use a custom constructor)
