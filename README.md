@@ -55,6 +55,14 @@ log-server/
 └── docker-compose.yml    # Multi-container orchestration
 ```
 
+## 🛡️ Feature Specs & Governance (BDD)
+The behavior of this microservice is governed by strict specifications in the **[[business-bdd-brain|Business-Specs Brain]]**:
+- **TCP Ingestion (Cap'n Proto)**: [[FEAT-001-TCP-Ingestion-Capnp|FEAT-001: High-throughput Ingestion]]
+- **Atomic Ordering**: [[FEAT-002-Atomic-Ordering|FEAT-002: Zero-drift Message Sequencing]]
+- **Dynamic Batching**: [[FEAT-003-Dynamic-Batching|FEAT-003: Performance-optimized Flushing]]
+- **Rotation Strategy**: [[FEAT-004-Rotation-Strategy|FEAT-004: Storage-safe File Rotation]]
+- **Heartbeat Liveness**: [[FEAT-005-Heartbeat-Liveness|FEAT-005: Resilient Node Tracking]]
+
 ## Installation
 
 ### Prerequisites
@@ -323,54 +331,21 @@ cargo clippy
 
 - `src/config/`: Server configuration (Config struct)
 - `src/core/`: Core business logic (log_server, log_writer, protocol_handlers)
-- `src/models/`: Internal data model (LogEntry)
+- `src/models/`: Internal data models
 - `src/servers/`: Network protocol entry points (TCP, gRPC)
 - `src/transport/`: Low-level communication logic
 - `src/protocols/`: Protocol schemas and generated code
 - `src/utils/`: Terminal UI and helper functions
 
-## Testing
+## 🛡️ Testing & Verification
+All testing for the **log-server** is governed by the **Spec-First Protocol**. For the full list of behavioral test scenarios, validation results, and Gherkin specs, refer to the **[Feature Specs & Governance](#-feature-specs--governance-bdd)** section above.
 
-The Log Server includes a robust testing infrastructure covering both isolated logic and full system integration.
-
-### What is tested
-- **Log Formatting**: Validates fixed-width column alignment, Logfmt metadata serialization, and string truncation.
-- **Protocol Handlers**: Verifies correct mapping from Cap'n Proto and gRPC messages to the internal `LogEntry` model.
-- **Global Sequencing**: Ensures messages from multiple protocols (TCP/gRPC) share a single, strictly ordered sequence.
-- **System Resilience**: Confirms the `LogWriter` handles directory creation and file rotation safely.
-- **Microservice Configuration**: Validates environment/CLI argument parsing.
-- **Full Integration**: End-to-end testing from TCP/gRPC clients to the physical log file.
-
-### What is not tested yet
-- **Extreme Concurrency / Load Testing**: Benchmarks under massive simultaneous client load are not yet automated.
-- **Network Resilience / Reconnection**: Drop connections or half-open states edge cases are not fully tested.
-- **Malformed Message Resilience**: Deep fuzzing of incoming byte streams for Cap'n Proto / gRPC invalid payloads.
-
-### Test Categories
-
-#### 1. Unit Tests
-Located within the source files (e.g., `src/core/log_formatter.rs`), these tests verify internal utilities and data processing logic in isolation.
-
-#### 2. Integration Tests
-Located in `tests/integration_tests.rs`, this suite performs a full end-to-end verification:
-1. Starts a live `LogServer` instance on test ports.
-2. Connects real TCP (Cap'n Proto) and gRPC clients.
-3. Sends test traffic and verifies that the output `_main.log` contains correctly ordered and formatted entries.
-
-### How to Run Tests
-
+To run the local test suite:
 ```bash
-# Run all tests (Unit + Integration)
 cargo test
-
-# Run only unit tests
-cargo test --lib
-
-# Run only integration tests
-cargo test --test integration_tests
 ```
 
-### CI/CD Integration
+## 🛠️ CI/CD Integration
 Every change is automatically validated via GitHub Actions:
 - **Linting**: `cargo clippy` enforces best practices.
 - **Formatting**: `cargo fmt` ensures style consistency.
