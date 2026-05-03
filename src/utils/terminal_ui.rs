@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
 
-use crate::models::log_packet::LogPacket;
 use crate::models::log_entry::LogEntry;
+use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, truncate};
 
 static INTERNAL_SENDER: OnceLock<mpsc::Sender<LogPacket>> = OnceLock::new();
@@ -68,7 +68,7 @@ pub fn print_internal_log(
     if let (Some(sender), Some(counter)) = (INTERNAL_SENDER.get(), INTERNAL_COUNTER.get()) {
         let seq = counter.fetch_add(1, Ordering::SeqCst);
         let sender = sender.clone();
-        
+
         let entry = LogEntry {
             timestamp,
             hostname: get_hostname().to_string(),
@@ -97,7 +97,12 @@ pub fn print_internal_log(
         };
 
         tokio::spawn(async move {
-            let _ = sender.send(LogPacket { sequence: seq, entry }).await;
+            let _ = sender
+                .send(LogPacket {
+                    sequence: seq,
+                    entry,
+                })
+                .await;
         });
     }
 }

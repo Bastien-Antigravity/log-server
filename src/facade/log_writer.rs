@@ -2,6 +2,8 @@
 //!
 //! Handles ordered writing of log messages to files with rotation.
 
+use crate::core::log_formatter::format_log_message;
+use crate::models::log_packet::LogPacket;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::{
@@ -10,8 +12,6 @@ use tokio::{
     sync::mpsc,
     time::{sleep, Duration},
 };
-use crate::models::log_packet::LogPacket;
-use crate::core::log_formatter::format_log_message;
 
 /// Log writer configuration
 #[derive(Clone)]
@@ -118,13 +118,13 @@ impl LogWriter {
                     if !buffer.is_empty() && !buffer.contains_key(&current_sequence) {
                         let next_available = *buffer.keys().next().unwrap();
                         if next_available > current_sequence {
-                            eprintln!("[SEQUENCE_GAP_WARNING] Skipping from {} to {} due to timeout", 
+                            eprintln!("[SEQUENCE_GAP_WARNING] Skipping from {} to {} due to timeout",
                                 current_sequence, next_available);
                             current_sequence = next_available;
                         }
                     }
                 }
-                
+
                 // Shutdown condition
                 else => break,
             }
@@ -136,36 +136,63 @@ impl LogWriter {
                 // If we hit batch_size but don't have current_sequence, we must force progress
                 if !buffer.contains_key(&current_sequence) && buffer.len() >= batch_size {
                     let next_available = *buffer.keys().next().unwrap();
-                    eprintln!("[BUFFER_FULL_WARNING] Forcing progress to {} due to buffer pressure", next_available);
+                    eprintln!(
+                        "[BUFFER_FULL_WARNING] Forcing progress to {} due to buffer pressure",
+                        next_available
+                    );
                     current_sequence = next_available;
                 }
 
                 while let Some(entry) = buffer.remove(&current_sequence) {
                     // Format for console (with colors)
                     let console_msg = format_log_message(
-                        &entry.timestamp, &entry.hostname, &entry.logger_name, 
+                        &entry.timestamp,
+                        &entry.hostname,
+                        &entry.logger_name,
                         &crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
-                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
-                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
-                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
-                        true
+                        &entry.module,
+                        &entry.filename,
+                        &entry.function_name,
+                        &entry.line_number,
+                        &entry.message,
+                        &entry.path_name,
+                        &entry.process_id,
+                        &entry.process_name,
+                        &entry.thread_id,
+                        &entry.thread_name,
+                        &entry.service_name,
+                        &entry.stack_trace,
+                        true,
                     );
                     println!("{console_msg}");
 
                     // Format for file (no colors)
                     let file_msg = format_log_message(
-                        &entry.timestamp, &entry.hostname, &entry.logger_name, 
+                        &entry.timestamp,
+                        &entry.hostname,
+                        &entry.logger_name,
                         &crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
-                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
-                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
-                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
-                        false
+                        &entry.module,
+                        &entry.filename,
+                        &entry.function_name,
+                        &entry.line_number,
+                        &entry.message,
+                        &entry.path_name,
+                        &entry.process_id,
+                        &entry.process_name,
+                        &entry.thread_id,
+                        &entry.thread_name,
+                        &entry.service_name,
+                        &entry.stack_trace,
+                        false,
                     );
 
                     batch.push(file_msg);
                     current_sequence += 1;
-                    
-                    if batch.len() >= batch_size { break; }
+
+                    if batch.len() >= batch_size {
+                        break;
+                    }
                 }
 
                 if !batch.is_empty() {
@@ -179,8 +206,10 @@ impl LogWriter {
                     }
                     file.flush().await?;
                 }
-                
-                if buffer.is_empty() { break; }
+
+                if buffer.is_empty() {
+                    break;
+                }
             }
 
             // Adjust batch size dynamically
@@ -194,12 +223,23 @@ impl LogWriter {
         // Flush remaining messages
         for (_, entry) in buffer {
             let file_msg = format_log_message(
-                &entry.timestamp, &entry.hostname, &entry.logger_name, 
+                &entry.timestamp,
+                &entry.hostname,
+                &entry.logger_name,
                 &crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
-                &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
-                &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
-                &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
-                false
+                &entry.module,
+                &entry.filename,
+                &entry.function_name,
+                &entry.line_number,
+                &entry.message,
+                &entry.path_name,
+                &entry.process_id,
+                &entry.process_name,
+                &entry.thread_id,
+                &entry.thread_name,
+                &entry.service_name,
+                &entry.stack_trace,
+                false,
             );
             let log_line = format!("{file_msg}\n");
             file.write_all(log_line.as_bytes()).await?;

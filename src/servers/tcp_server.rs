@@ -1,11 +1,11 @@
 //! TCP socket server for Cap'n Proto messages
 
+use crate::models::log_packet::LogPacket;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
-use crate::models::log_packet::LogPacket;
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::{handle_tcp_message, identify_client_from_handshake};
@@ -114,7 +114,12 @@ impl TcpServer {
         // SECURITY: 5-second timeout to prevent connection-holding (Slow-Loris) attacks.
         let first_bytes = match timeout(Duration::from_secs(5), reader.receive_data()).await {
             Ok(res) => res?,
-            Err(_) => return Err(format!("{name} : handshake timeout from {peer_ip}. Closing connection.").into()),
+            Err(_) => {
+                return Err(format!(
+                    "{name} : handshake timeout from {peer_ip}. Closing connection."
+                )
+                .into())
+            }
         };
         let actual_client_name;
 
@@ -132,10 +137,16 @@ impl TcpServer {
                         &format!("{name} : client identified via handshake as '{identity}'"),
                     );
                 } else {
-                    return Err(format!("{name} : malformed handshake received from {peer_ip}. Closing connection.").into());
+                    return Err(format!(
+                        "{name} : malformed handshake received from {peer_ip}. Closing connection."
+                    )
+                    .into());
                 }
             } else {
-                return Err(format!("{name} : mandatory handshake skipped by {peer_ip}. Closing connection.").into());
+                return Err(format!(
+                    "{name} : mandatory handshake skipped by {peer_ip}. Closing connection."
+                )
+                .into());
             }
         } else {
             return Ok(()); // Connection closed before handshake
@@ -185,8 +196,13 @@ impl TcpServer {
 
             let data = bytes_read.unwrap().to_vec();
 
-            if let Err(e) =
-                handle_tcp_message(data, writer_tx.clone(), sequence_counter.clone(), &actual_client_name).await
+            if let Err(e) = handle_tcp_message(
+                data,
+                writer_tx.clone(),
+                sequence_counter.clone(),
+                &actual_client_name,
+            )
+            .await
             {
                 print_internal_log(
                     "ERROR",

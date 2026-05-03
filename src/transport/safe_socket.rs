@@ -47,7 +47,10 @@ impl SafeSocketReader {
             if slen > MAX_MESSAGE_SIZE {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("message too large: {} bytes (max: {})", slen, MAX_MESSAGE_SIZE),
+                    format!(
+                        "message too large: {} bytes (max: {})",
+                        slen, MAX_MESSAGE_SIZE
+                    ),
                 ));
             }
 

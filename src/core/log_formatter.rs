@@ -135,7 +135,8 @@ mod tests {
     fn test_truncation() {
         let long_host = "very-long-hostname-that-should-be-truncated";
         let formatted = format_log_message(
-            "time", long_host, "log", "INFO", "", "", "", "", "msg", "", "", "", "", "", "", "", false,
+            "time", long_host, "log", "INFO", "", "", "", "", "msg", "", "", "", "", "", "", "",
+            false,
         );
 
         // The helper truncate(hostname, 12) should be used

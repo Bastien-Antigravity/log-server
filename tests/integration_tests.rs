@@ -84,8 +84,8 @@ async fn send_test_tcp_with_handshake(host: &str, port: u16) {
     // --- Part 1: Handshake (Unpacked) ---
     let mut hello_msg = ::capnp::message::Builder::new_default();
     {
-        let mut builder =
-            hello_msg.init_root::<::log_server::protocols::capnp::logger_msg::logger_msg::Builder>();
+        let mut builder = hello_msg
+            .init_root::<::log_server::protocols::capnp::logger_msg::logger_msg::Builder>();
         builder.set_timestamp("IntegrationTestClient");
         builder.set_hostname("localhost");
     }
