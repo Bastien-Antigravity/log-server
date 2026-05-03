@@ -11,6 +11,7 @@ use crate::config::config::Config;
 use crate::core::protocol_handlers::handle_grpc_message;
 use crate::line_str;
 use crate::models::log_entry::LogEntry;
+use crate::models::log_packet::LogPacket;
 use crate::utils::terminal_ui::print_internal_log;
 
 // Add this line - it includes the generated gRPC code
@@ -20,20 +21,20 @@ pub mod log_service {
 
 // Import the generated types
 use log_service::{
-    log_service_server::{LogService, LogServiceServer},
+    log_bridge_server::{LogBridge, LogBridgeServer},
     LogRequest as ProtoLogRequest, // Rename the imported type
     LogResponse,
 };
 
-/// gRPC server for log messages
-pub struct GrpcServer {
+/// gRPC bridge gateway for log messages (Web/JS support)
+pub struct LogBridgeGateway {
     config: Config,
 }
 
 //-----------------------------------------------------------------------------------------------
 
-impl GrpcServer {
-    /// Create new gRPC server
+impl LogBridgeGateway {
+    /// Create new gRPC bridge gateway
     pub fn new(config: &Config) -> Self {
         Self {
             config: config.clone(),
@@ -50,7 +51,7 @@ impl GrpcServer {
     /// Run the gRPC server
     pub async fn run(
         &self,
-        writer_tx: mpsc::Sender<String>,
+        writer_tx: mpsc::Sender<LogPacket>,
         sequence_counter: Arc<AtomicU64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!(
@@ -59,7 +60,7 @@ impl GrpcServer {
             port = self.config.grpc_port
         )
         .parse()?;
-        let service = GrpcLogServiceImpl::new(&self.config, writer_tx, sequence_counter);
+        let service = LogBridgeServiceImpl::new(&self.config, writer_tx, sequence_counter);
 
         print_internal_log(
             "INFO",
@@ -67,11 +68,11 @@ impl GrpcServer {
             "grpc_server.rs",
             "run",
             line_str!(),
-            &format!("{} : gRPC server listening on {}", self.config.name, addr),
+            &format!("{} : Log Bridge listening on {}", self.config.name, addr),
         );
 
         Server::builder()
-            .add_service(LogServiceServer::new(service))
+            .add_service(LogBridgeServer::new(service))
             .serve(addr)
             .await?;
 
@@ -81,20 +82,20 @@ impl GrpcServer {
 
 //-----------------------------------------------------------------------------------------------
 
-/// gRPC service implementation
-pub struct GrpcLogServiceImpl {
-    writer_tx: mpsc::Sender<String>,
+/// gRPC bridge service implementation
+pub struct LogBridgeServiceImpl {
+    writer_tx: mpsc::Sender<LogPacket>,
     sequence_counter: Arc<AtomicU64>,
     name: String,
 }
 
 //-----------------------------------------------------------------------------------------------
 
-impl GrpcLogServiceImpl {
-    /// Create new gRPC service implementation
+impl LogBridgeServiceImpl {
+    /// Create new gRPC bridge implementation
     pub fn new(
         config: &Config,
-        writer_tx: mpsc::Sender<String>,
+        writer_tx: mpsc::Sender<LogPacket>,
         sequence_counter: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -108,7 +109,7 @@ impl GrpcLogServiceImpl {
 //-----------------------------------------------------------------------------------------------
 
 #[tonic::async_trait]
-impl LogService for GrpcLogServiceImpl {
+impl LogBridge for LogBridgeServiceImpl {
     /// Handle incoming gRPC log message
     async fn log_message(
         &self,

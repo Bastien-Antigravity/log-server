@@ -10,6 +10,8 @@ use tokio::{
     sync::mpsc,
     time::{sleep, Duration},
 };
+use crate::models::log_packet::LogPacket;
+use crate::core::log_formatter::format_log_message;
 
 /// Log writer configuration
 #[derive(Clone)]
@@ -75,8 +77,8 @@ impl LogWriter {
     //-----------------------------------------------------------------------------------------------
 
     /// Start the writer task
-    pub fn start_writer_task(&self) -> mpsc::Sender<String> {
-        let (writer_tx, writer_rx) = mpsc::channel::<String>(self.config.buffer_size);
+    pub fn start_writer_task(&self) -> mpsc::Sender<LogPacket> {
+        let (writer_tx, writer_rx) = mpsc::channel::<LogPacket>(self.config.buffer_size);
         let base_path = self.base_file_path.clone();
         let config = self.config.clone();
 
@@ -93,27 +95,22 @@ impl LogWriter {
 
     /// Main writer task implementation
     async fn writer_task(
-        mut rx: mpsc::Receiver<String>,
+        mut rx: mpsc::Receiver<LogPacket>,
         base_file_path: PathBuf,
         config: WriterConfig,
     ) -> tokio::io::Result<()> {
         let mut file = File::create(&base_file_path).await?;
         let mut file_size = 0u64;
-        let mut buffer: BTreeMap<u64, String> = BTreeMap::new();
+        let mut buffer: BTreeMap<u64, crate::models::log_entry::LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
         let mut batch_size = config.initial_batch_size;
         let mut gap_timer = tokio::time::interval(Duration::from_millis(config.gap_timeout_ms));
 
         loop {
             tokio::select! {
-                // Branch 1: Incoming messages
-                Some(message) = rx.recv() => {
-                    // Parse sequence number and message
-                    if let Some((seq_str, log_data)) = message.split_once(' ') {
-                        if let Ok(sequence) = seq_str.parse::<u64>() {
-                            buffer.insert(sequence, log_data.to_string());
-                        }
-                    }
+                // Branch 1: Incoming structured packets (Zero-String Policy)
+                Some(packet) = rx.recv() => {
+                    buffer.insert(packet.sequence, packet.entry);
                 }
 
                 // Branch 2: Gap Timeout / Periodic Flush
@@ -143,17 +140,29 @@ impl LogWriter {
                     current_sequence = next_available;
                 }
 
-                while let Some(data) = buffer.remove(&current_sequence) {
-                    // Threshold updated to 80 (pre-level 70 + level 10)
-                    if data.len() >= 80 {
-                        let level_part = data[70..80].trim();
-                        let colored_level = crate::utils::terminal_ui::colorize_level(level_part);
-                        println!("{}{}{}", &data[..70], colored_level, &data[80..]);
-                    } else {
-                        println!("{data}");
-                    }
+                while let Some(entry) = buffer.remove(&current_sequence) {
+                    // Format for console (with colors)
+                    let console_msg = format_log_message(
+                        &entry.timestamp, &entry.hostname, &entry.logger_name, 
+                        &crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
+                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
+                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
+                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
+                        true
+                    );
+                    println!("{console_msg}");
 
-                    batch.push(data);
+                    // Format for file (no colors)
+                    let file_msg = format_log_message(
+                        &entry.timestamp, &entry.hostname, &entry.logger_name, 
+                        &crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
+                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
+                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
+                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
+                        false
+                    );
+
+                    batch.push(file_msg);
                     current_sequence += 1;
                     
                     if batch.len() >= batch_size { break; }
@@ -183,9 +192,17 @@ impl LogWriter {
         }
 
         // Flush remaining messages
-        for (_, data) in buffer {
-            let log_entry = format!("{data}\n");
-            file.write_all(log_entry.as_bytes()).await?;
+        for (_, entry) in buffer {
+            let file_msg = format_log_message(
+                &entry.timestamp, &entry.hostname, &entry.logger_name, 
+                &crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
+                &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
+                &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
+                &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
+                false
+            );
+            let log_line = format!("{file_msg}\n");
+            file.write_all(log_line.as_bytes()).await?;
         }
 
         file.flush().await?;

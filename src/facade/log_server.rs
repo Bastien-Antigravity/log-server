@@ -5,9 +5,9 @@
 use std::sync::Arc;
 
 use crate::config::config::Config;
-use crate::core::log_writer::LogWriter;
+use crate::facade::log_writer::LogWriter;
 use crate::line_str;
-use crate::servers::grpc_server::GrpcServer;
+use crate::servers::grpc_server::LogBridgeGateway;
 use crate::servers::tcp_server::TcpServer;
 use crate::utils::terminal_ui::print_internal_log;
 
@@ -98,9 +98,9 @@ impl LogServer {
             }
         });
 
-        // Conditionally start gRPC server
+        // Conditionally start gRPC bridge gateway
         let grpc_handle = if self.enable_grpc {
-            let grpc_server = GrpcServer::new(&self.config);
+            let grpc_server = LogBridgeGateway::new(&self.config);
             let grpc_writer_tx = writer_tx.clone();
             let grpc_sequence_counter = sequence_counter.clone();
 
@@ -112,7 +112,7 @@ impl LogServer {
                         "log_server.rs",
                         "run",
                         line_str!(),
-                        &format!("gRPC server error: {e}"),
+                        &format!("Log Bridge error: {e}"),
                     );
                 }
             }))

@@ -117,15 +117,25 @@ Note: Full configuration uses the standard `microservice-toolbox` address resolu
 |-----------------|--------------|----------------------------------------|
 | `--name`        | `log-server` | Server instance name                   |
 | `--host`        | `127.0.0.1`  | Host address to bind to                |
-| `--port`        | `1234     `  | Port number to bind to                 |
-| `--grpc_host`   | `127.0.0.2`  | Host address for gRPC to bind to       |
-| `--grpc_port`   | `2345`       | Port number for gRPC to bind to        |
+| `--port`        | `15000`      | Port number to bind to (TCP)           |
+| `--grpc_host`   | `127.0.0.1`  | Host address for Log Bridge to bind to |
+| `--grpc_port`   | `15001`      | Port number for Log Bridge to bind to  |
 
 ## Message Format
 
-### Cap'n Proto Schema
+### TCP Protocol (Hardened)
 
-The TCP server accepts messages in Cap'n Proto format with the following structure:
+The TCP server (Port 15000) enforces a strict communication protocol:
+
+1.  **Framing**: Every message must be prefixed with a **4-byte Big-Endian length** field.
+2.  **Handshake**: Immediately upon connection, the client must send a `HelloMsg` (Cap'n Proto). Failure to provide identity results in immediate disconnection.
+3.  **Serialization**: Packed Cap'n Proto is used for log entries.
+
+### Log Bridge (gRPC)
+
+The Log Bridge (Port 15001) provides a gRPC gateway for environments without raw TCP access (e.g., Web/JS).
+
+### Cap'n Proto Schema
 
 ```capnp
 struct LoggerMsg {

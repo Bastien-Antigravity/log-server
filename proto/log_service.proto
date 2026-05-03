@@ -18,7 +18,7 @@ enum Level {
   CRITICAL = 11;
 }
 
-service LogService {
+service LogBridge {
     rpc LogMessage(LogRequest) returns (LogResponse);
 }
 

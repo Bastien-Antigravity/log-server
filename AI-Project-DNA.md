@@ -21,3 +21,9 @@
 - **Protected Branches**: `main`, `master`
 - **Versioning Strategy**: Semantic Versioning (vX.Y.Z).
 - **Version Source of Truth**: `VERSION.txt` (Must be synced to `Cargo.toml`).
+
+## 🏗️ Core Architecture (The Bridge Pattern)
+- **High-Performance Core**: Cap'n Proto over TCP with 4-byte BE framing and Mandatory Handshake.
+- **Interoperability Bridge**: gRPC "Log Bridge" (Port 15001) for JS/HTTP environments.
+- **Zero-String Policy**: Delayed formatting for maximum throughput.
+- **Single Ordered Writer**: Guaranteed sequential logs via centralized MPSC channel.

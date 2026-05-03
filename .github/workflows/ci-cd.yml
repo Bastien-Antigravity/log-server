@@ -56,9 +56,61 @@ jobs:
       - name: Run all tests
         run: cargo test
 
+  adversarial-validation:
+    name: Protocol Hardening (Adversarial)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Log-Server
+        uses: actions/checkout@v4
+        with:
+          path: log-server
+
+      - name: Checkout Sandbox-Testing
+        uses: actions/checkout@v4
+        with:
+          repository: Bastien-Antigravity/sandbox-testing
+          path: sandbox-testing
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.91"
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler capnproto
+
+      - name: Build Log-Server
+        run: |
+          cd log-server
+          cargo build
+          echo "SERVER_BIN=$(pwd)/target/debug/log-server" >> $GITHUB_ENV
+
+      - name: Run Adversarial Tests
+        run: |
+          # Start log-server in background
+          ${{ env.SERVER_BIN }} --port 15000 --grpc-port 15001 &
+          SERVER_PID=$!
+          
+          # Give it a moment to start
+          sleep 5
+          
+          # Run tests from sandbox-testing
+          cd sandbox-testing/implementations/go
+          go test -v .
+          
+          # Cleanup
+          kill $SERVER_PID
+
   build-push:
     name: Build & Push Docker
-    needs: test
+    needs: adversarial-validation
     if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     permissions:

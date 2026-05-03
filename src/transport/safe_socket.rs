@@ -10,6 +10,9 @@ pub struct SafeSocketReader {
     reader: OwnedReadHalf,
 }
 
+/// Maximum allowed message size (10MB) to prevent OOM attacks.
+const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
+
 /// Writer half of a safe socket
 pub struct SafeSocketWriter {
     writer: OwnedWriteHalf,
@@ -39,6 +42,14 @@ impl SafeSocketReader {
             }
 
             let slen = u32::from_be_bytes(length_buf) as usize;
+
+            // SECURITY: Prevent OOM by enforcing a maximum message size
+            if slen > MAX_MESSAGE_SIZE {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("message too large: {} bytes (max: {})", slen, MAX_MESSAGE_SIZE),
+                ));
+            }
 
             // HEARTBEAT: If length is 0, skip and wait for next frame
             if slen == 0 {

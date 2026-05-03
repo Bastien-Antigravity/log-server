@@ -24,8 +24,12 @@ directives:
 ## 🚀 Progress Tracking
 - [x] Initialized session state tracking for this repository.
 - [x] Synchronized with the Global Obsidian Brain.
+- [x] **Structural Repair**: Created `src/facade/`, `src/interfaces/`, and `doc/` directories (Sentinel/Developer).
+- [x] **Documentation Centralization**: Migrated `ARCHITECTURE.md` to the Obsidian Brain and archived the local copy (DocMaintainer).
+- [x] **Naming Convention Alignment**: Verified `LogEntry` naming against updated Global Architecture Rules (Architect).
 
 ## 🐛 Local Issues / Bugs
+- **Active Protocol**: [[MODE-MANUAL#Mode-1-Spec-First]] (Spec-First)
 - None identified.
 
 ## ⏭ Next Actions

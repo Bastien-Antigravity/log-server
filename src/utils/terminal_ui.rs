@@ -3,14 +3,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
 
-use crate::core::log_formatter::format_log_message;
+use crate::models::log_packet::LogPacket;
+use crate::models::log_entry::LogEntry;
 use crate::utils::helpers::{get_hostname, truncate};
 
-static INTERNAL_SENDER: OnceLock<mpsc::Sender<String>> = OnceLock::new();
+static INTERNAL_SENDER: OnceLock<mpsc::Sender<LogPacket>> = OnceLock::new();
 static INTERNAL_COUNTER: OnceLock<Arc<AtomicU64>> = OnceLock::new();
 
 /// Initialize the internal logger with a sender and counter
-pub fn set_internal_logger(sender: mpsc::Sender<String>, counter: Arc<AtomicU64>) {
+pub fn set_internal_logger(sender: mpsc::Sender<LogPacket>, counter: Arc<AtomicU64>) {
     let _ = INTERNAL_SENDER.set(sender);
     let _ = INTERNAL_COUNTER.set(counter);
 }
@@ -47,27 +48,7 @@ pub fn print_internal_log(
 ) {
     let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
 
-    // 1. Generate formatted message for file (includes metadata)
-    let file_formatted = format_log_message(
-        &timestamp,
-        get_hostname(),
-        logger_name,
-        level,
-        "log-server",
-        filename,
-        function_name,
-        line,
-        message,
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-        "",
-    );
-
-    // 2. Direct console output with functional coloring (only if writer not yet active)
+    // 1. Direct console output with functional coloring (only if writer not yet active)
     if INTERNAL_SENDER.get().is_none() {
         let level_colored = colorize_level(level);
         println!(
@@ -83,13 +64,40 @@ pub fn print_internal_log(
         );
     }
 
-    // Write to file if enabled
+    // 2. Map to internal LogEntry and queue for file write
     if let (Some(sender), Some(counter)) = (INTERNAL_SENDER.get(), INTERNAL_COUNTER.get()) {
         let seq = counter.fetch_add(1, Ordering::SeqCst);
-        let final_file_msg = format!("{seq} {file_formatted}");
         let sender = sender.clone();
+        
+        let entry = LogEntry {
+            timestamp,
+            hostname: get_hostname().to_string(),
+            logger_name: logger_name.to_string(),
+            level: match level {
+                "NOTSET" => 0,
+                "DEBUG" => 1,
+                "STREAM" => 2,
+                "INFO" => 3,
+                "LOGON" => 4,
+                "LOGOUT" => 5,
+                "TRADE" => 6,
+                "SCHEDULE" => 7,
+                "REPORT" => 8,
+                "WARNING" => 9,
+                "ERROR" => 10,
+                "CRITICAL" => 11,
+                _ => 3, // Default to INFO (index 3)
+            },
+            module: "log-server".into(),
+            filename: filename.to_string(),
+            function_name: function_name.to_string(),
+            line_number: line.to_string(),
+            message: message.to_string(),
+            ..Default::default()
+        };
+
         tokio::spawn(async move {
-            let _ = sender.send(final_file_msg).await;
+            let _ = sender.send(LogPacket { sequence: seq, entry }).await;
         });
     }
 }

@@ -17,7 +17,7 @@ jobs:
         if: hashFiles('go.mod') != ''
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.25.x'
       - name: Go Lint & Test
         if: hashFiles('go.mod') != ''
         run: |
@@ -36,7 +36,7 @@ jobs:
           pip install -r requirements.txt
           pytest
 
-      # Sandbox Integration (Global)
-      - name: Run Sandbox Integration
-        run: echo "Triggering sandbox-testing workflow..."
-        # This would typically use a repository_dispatch or a shared action
+      # Sandbox Integration
+      # NOTE: Full adversarial protocol hardening is enforced in ci-cd.yml
+      # via the `adversarial-validation` job (FEAT-006). This file is the
+      # fleet-wide lightweight standard — not the deployment gate.

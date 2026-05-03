@@ -3,6 +3,7 @@
 //! Centralized definitions to prevent circular dependencies between modules.
 
 /// Internal log request wrapper for internal use
+#[derive(Debug, Clone, Default)]
 pub struct LogEntry {
     pub timestamp: String,
     pub hostname: String,

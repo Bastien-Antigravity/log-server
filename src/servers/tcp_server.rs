@@ -4,6 +4,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::time::{timeout, Duration};
+use crate::models::log_packet::LogPacket;
 
 use crate::config::config::Config;
 use crate::core::protocol_handlers::{handle_tcp_message, identify_client_from_handshake};
@@ -36,7 +38,7 @@ impl TcpServer {
     /// Run the TCP server
     pub async fn run(
         &self,
-        writer_tx: mpsc::Sender<String>,
+        writer_tx: mpsc::Sender<LogPacket>,
         sequence_counter: Arc<AtomicU64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!(
@@ -85,7 +87,7 @@ impl TcpServer {
     /// Handle individual TCP connection
     async fn handle_tcp_connection(
         socket: TcpStream,
-        writer_tx: mpsc::Sender<String>,
+        writer_tx: mpsc::Sender<LogPacket>,
         sequence_counter: Arc<AtomicU64>,
         name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -108,10 +110,13 @@ impl TcpServer {
             &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
-        // 1. Initial Handshake / Identity Detection (Hybrid Protocol)
-        let first_bytes = reader.receive_data().await?;
-        let mut actual_client_name = format!("{name}_{peer_ip}_{peer_port}");
-        let mut first_log_data = None;
+        // 1. Initial Handshake / Identity Detection (Mandatory - FEAT-006)
+        // SECURITY: 5-second timeout to prevent connection-holding (Slow-Loris) attacks.
+        let first_bytes = match timeout(Duration::from_secs(5), reader.receive_data()).await {
+            Ok(res) => res?,
+            Err(_) => return Err(format!("{name} : handshake timeout from {peer_ip}. Closing connection.").into()),
+        };
+        let actual_client_name;
 
         if let Some(data) = first_bytes {
             // Unpacked Cap'n Proto messages (like HelloMsg) start with segment count 0 (4 zero bytes)
@@ -127,13 +132,13 @@ impl TcpServer {
                         &format!("{name} : client identified via handshake as '{identity}'"),
                     );
                 } else {
-                    // Not a valid handshake, assume it's data
-                    first_log_data = Some(data.to_vec());
+                    return Err(format!("{name} : malformed handshake received from {peer_ip}. Closing connection.").into());
                 }
             } else {
-                // Packed message or unknown -> assume first log message
-                first_log_data = Some(data.to_vec());
+                return Err(format!("{name} : mandatory handshake skipped by {peer_ip}. Closing connection.").into());
             }
+        } else {
+            return Ok(()); // Connection closed before handshake
         }
 
         // Spawn background heartbeat task (every 10 seconds)
@@ -160,22 +165,7 @@ impl TcpServer {
             }
         });
 
-        // 2. Process first log if it was already read
-        if let Some(data) = first_log_data {
-            if let Err(e) =
-                handle_tcp_message(data, writer_tx.clone(), sequence_counter.clone(), &actual_client_name).await
-            {
-                print_internal_log(
-                    "ERROR",
-                    &actual_client_name,
-                    "tcp_server.rs",
-                    "handle_tcp_connection",
-                    line_str!(),
-                    &format!("{actual_client_name} : initial message handling failed: {e}"),
-                );
-                return Ok(());
-            }
-        }
+        // 2. Main Message Loop
 
         // 3. Main Message Loop
         loop {

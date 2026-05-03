@@ -23,14 +23,21 @@ pub fn format_log_message(
     thread_name: &str,
     service_name: &str,
     stack_trace: &str,
+    use_color: bool,
 ) -> String {
+    let display_level = if use_color {
+        crate::utils::terminal_ui::colorize_level(level)
+    } else {
+        level.to_string()
+    };
+
     // 1. Basic 8 columns (Fixed width)
     let base = format!(
         "{:<33} {:<12} {:<22} {:<10} {:<20} {:<25} {:<6} {}",
         timestamp,
         truncate(hostname, 12),
         truncate(logger_name, 22),
-        truncate(level, 10),
+        truncate(&display_level, 10),
         truncate(filename, 20),
         truncate(function_name, 25),
         truncate(line_number, 6),
@@ -97,6 +104,7 @@ mod tests {
             "",
             "",
             "",
+            false,
         );
 
         // Check fixed columns (33 + 1 + 12 + 1 + 15 + 1 + 8 + 1 + 20 + 1 + 25 + 1 + 6 + 1 + length of message)
@@ -111,7 +119,7 @@ mod tests {
     fn test_format_log_message_with_metadata() {
         let formatted = format_log_message(
             "time", "host", "log", "DEBUG", "mod", "file", "func", "1", "msg", "path", "123",
-            "pname", "456", "tname", "svc", "stack",
+            "pname", "456", "tname", "svc", "stack", false,
         );
 
         assert!(formatted.contains("path=path"));
@@ -127,7 +135,7 @@ mod tests {
     fn test_truncation() {
         let long_host = "very-long-hostname-that-should-be-truncated";
         let formatted = format_log_message(
-            "time", long_host, "log", "INFO", "", "", "", "", "msg", "", "", "", "", "", "", "",
+            "time", long_host, "log", "INFO", "", "", "", "", "msg", "", "", "", "", "", "", "", false,
         );
 
         // The helper truncate(hostname, 12) should be used

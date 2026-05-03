@@ -3,7 +3,7 @@
 //! Centralized logging server that handles both TCP socket (Cap'n Proto)
 //! and gRPC log messages with ordered file writing and rotation.
 
-use log_server::core::log_server::LogServer;
+use log_server::facade::log_server::LogServer;
 use log_server::line_str;
 use log_server::utils::terminal_ui::print_internal_log;
 
@@ -59,7 +59,7 @@ fn main() {
             "main.rs",
             "main",
             line_str!(),
-            &format!("{name} : gRPC server enabled"),
+            &format!("{name} : Log Bridge enabled"),
         );
     }
 

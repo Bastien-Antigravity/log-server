@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod core;
+pub mod facade;
 pub mod models;
 pub mod protocols;
 pub mod servers;
@@ -13,4 +14,5 @@ pub mod utils;
 
 // Re-export main components
 pub use config::config::Config;
-pub use core::log_server::LogServer;
+pub use facade::log_server::LogServer;
+pub use facade::log_writer::LogWriter;
