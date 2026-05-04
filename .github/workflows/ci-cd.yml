@@ -19,7 +19,7 @@ jobs:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -42,7 +42,7 @@ jobs:
     needs: lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -62,12 +62,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Log-Server
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: log-server
 
       - name: Checkout Sandbox-Testing
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Bastien-Antigravity/sandbox-testing
           path: sandbox-testing
@@ -117,7 +117,7 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
