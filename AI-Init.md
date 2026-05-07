@@ -1,3 +1,9 @@
+---
+microservice: log-server
+type: governance
+status: active
+---
+
 # ⚡ AI Initialization: log-server
 
 > [!IMPORTANT] MANDATORY INITIALIZATION
