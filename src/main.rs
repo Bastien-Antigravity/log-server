@@ -26,6 +26,15 @@ fn main() {
         .get_listen_addr(name)
         .unwrap_or_else(|_| format!("{}:{}", default_host, default_port));
 
+    print_internal_log(
+        "INFO",
+        name,
+        "main.rs",
+        "main",
+        line_str!(),
+        &format!("{name} : starting log server with profile: {}", ac.profile),
+    );
+
     let default_grpc_host = ac.cli_args.grpc_host.as_deref().unwrap_or(default_host);
     let default_grpc_port = ac.cli_args.grpc_port.unwrap_or(default_port + 1);
     let grpc_listen_addr = ac
@@ -43,14 +52,6 @@ fn main() {
     let grpc_parts: Vec<&str> = grpc_listen_addr.split(':').collect();
     let grpc_port = grpc_parts[1].parse::<u16>().unwrap_or(default_grpc_port);
 
-    print_internal_log(
-        "INFO",
-        name,
-        "main.rs",
-        "main",
-        line_str!(),
-        &format!("{name} : starting log server"),
-    );
 
     if enable_grpc {
         print_internal_log(
