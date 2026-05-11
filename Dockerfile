@@ -17,7 +17,7 @@ COPY . .
 RUN cargo build --release
 
 # === RUNTIME STAGE ===
-FROM alpine:3.21
+FROM alpine:3.20
 
 # Install runtime dependencies including protoc
 RUN apk add --no-cache \
