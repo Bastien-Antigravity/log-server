@@ -4,8 +4,9 @@ type: repository
 status: active
 language: rust
 tags:
-  - domain/observability
-  - domain/networking
+- \'#service/log-server\'
+  - '#domain/observability'
+  - '#domain/networking'
 ---
 
 # Log Server
