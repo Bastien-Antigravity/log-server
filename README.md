@@ -4,9 +4,10 @@ type: repository
 status: active
 language: rust
 tags:
-- \'#service/log-server\'
-  - '#domain/observability'
-  - '#domain/networking'
+- '#service/log-server'
+- '#domain/observability'
+- '#domain/networking'
+- '#zone/3-fleet'
 ---
 
 # Log Server
