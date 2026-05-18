@@ -30,11 +30,13 @@ A high-performance, centralized logging server written in Rust that handles both
 log-server/
 ├── src/
 │   ├── config/           # Server configuration (Config struct)
-│   ├── core/             # Core business logic
+│   ├── facade/           # Primary orchestrators (Facade pattern)
 │   │   ├── log_server.rs    # Main orchestrator (LogServer object)
-│   │   ├── log_writer.rs    # File/Console output (LogWriter object)
+│   │   └── log_writer.rs    # File/Console output (LogWriter object)
+│   ├── core/             # Core business logic
 │   │   ├── protocol_handlers.rs # Message processing logic
-│   │   └── log_formatter.rs # Logfmt/Console formatting
+│   │   ├── log_formatter.rs # Logfmt/Console formatting
+│   │   └── reorder_test.rs  # In-code unit tests for sequencing
 │   ├── models/           # Data definitions
 │   │   └── log_entry.rs     # Central LogEntry model
 │   ├── servers/          # Network entry points
@@ -44,15 +46,16 @@ log-server/
 │   │   └── safe_socket.rs   # TCP framing and socket management
 │   ├── protocols/        # Protocol schemas and generated code
 │   │   └── capnp/           # Cap'n Proto generated code
+│   ├── schema/           # Protocol schema sources
+│   │   ├── capnp/
+│   │   │   └── logger.capnp # Cap'n Proto binary serialization schema
+│   │   └── proto/
+│   │       └── log_service.proto # gRPC network schema
 │   ├── utils/
 │   │   ├── terminal_ui.rs   # ANSI coloring and terminal helpers
 │   │   └── helpers.rs       # IO and string utilities
 │   ├── main.rs           # Entry point binary
 │   └── lib.rs            # Library entry
-├── capnp/
-│   └── logger.capnp      # Cap'n Proto schema
-├── proto/
-│   └── log_service.proto # gRPC proto definition
 ├── Dockerfile            # Container definition
 └── docker-compose.yml    # Multi-container orchestration
 ```
@@ -118,16 +121,16 @@ Note: Full configuration uses the standard `microservice-toolbox` address resolu
 | Option          | Default      | Description                            |
 |-----------------|--------------|----------------------------------------|
 | `--name`        | `log-server` | Server instance name                   |
-| `--host`        | `127.0.0.1`  | Host address to bind to                |
-| `--port`        | `15000`      | Port number to bind to (TCP)           |
-| `--grpc_host`   | `127.0.0.1`  | Host address for Log Bridge to bind to |
-| `--grpc_port`   | `15001`      | Port number for Log Bridge to bind to  |
+| `--host`        | `0.0.0.0`    | Host address to bind to                |
+| `--port`        | `9020`       | Port number to bind to (TCP)           |
+| `--grpc_host`   | `0.0.0.0`    | Host address for Log Bridge to bind to |
+| `--grpc_port`   | `9021`       | Port number for Log Bridge to bind to  |
 
 ## Message Format
 
 ### TCP Protocol (Hardened)
 
-The TCP server (Port 15000) enforces a strict communication protocol:
+The TCP server (Port 9020) enforces a strict communication protocol:
 
 1.  **Framing**: Every message must be prefixed with a **4-byte Big-Endian length** field.
 2.  **Handshake**: Immediately upon connection, the client must send a `HelloMsg` (Cap'n Proto). Failure to provide identity results in immediate disconnection.
@@ -135,7 +138,7 @@ The TCP server (Port 15000) enforces a strict communication protocol:
 
 ### Log Bridge (gRPC)
 
-The Log Bridge (Port 15001) provides a gRPC gateway for environments without raw TCP access (e.g., Web/JS).
+The Log Bridge (Port 9021) provides a gRPC gateway for environments without raw TCP access (e.g., Web/JS).
 
 ### Cap'n Proto Schema
 
@@ -177,7 +180,7 @@ enum Level {
 
 ### gRPC Protocol
 
-The gRPC server uses the `proto/log_service.proto` definition.
+The gRPC server uses the `src/schema/proto/log_service.proto` definition.
 
 ```protobuf
 service LogService {
@@ -284,11 +287,11 @@ For TCP (Cap'n Proto), a simple framing protocol is used:
 
 ### TCP (Cap'n Proto) Client
 
-Clients should use the `logger.capnp` schema. Messages must be serialized using Cap'n Proto's "packed" format and prefixed with a 4-byte big-endian length.
+Clients should use the `src/schema/capnp/logger.capnp` schema. Messages must be serialized using Cap'n Proto's "packed" format and prefixed with a 4-byte big-endian length.
 
 ### gRPC Client
 
-Clients can use the `proto/log_service.proto` definition. The service name is `LogService` and the method is `LogMessage`.
+Clients can use the `src/schema/proto/log_service.proto` definition. The service name is `LogService` and the method is `LogMessage`.
 
 ## Performance Characteristics
 
@@ -342,11 +345,13 @@ cargo clippy
 ### Project Structure
 
 - `src/config/`: Server configuration (Config struct)
-- `src/core/`: Core business logic (log_server, log_writer, protocol_handlers)
+- `src/facade/`: Primary orchestrators (Facade pattern)
+- `src/core/`: Core business logic (protocol_handlers, log_formatter, reorder_test)
 - `src/models/`: Internal data models
 - `src/servers/`: Network protocol entry points (TCP, gRPC)
 - `src/transport/`: Low-level communication logic
-- `src/protocols/`: Protocol schemas and generated code
+- `src/protocols/`: Generated code bindings
+- `src/schema/`: Protocol schema sources (Cap'n Proto & Protobuf)
 - `src/utils/`: Terminal UI and helper functions
 
 ## 🛡️ Testing & Verification
