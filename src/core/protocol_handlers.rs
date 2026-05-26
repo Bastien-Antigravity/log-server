@@ -12,8 +12,17 @@ mod capnp_protocol {
 }
 
 /// Identify client from SafeSocket Hello handshake (Unpacked Cap'n Proto)
-/// This uses a "Layout Hack" by abusing the LoggerMsg reader, since both structs
-/// start with Text fields at indices 0 and 1.
+/// 
+/// ⚠️ ARCHITECTURAL HACK: 
+/// This implementation abuses the fact that 'HelloMsg' (from safe-socket) and 
+/// 'LoggerMsg' (from log-server) both start with two Text fields at @0 and @1.
+/// 
+/// Layout Comparison:
+/// - HelloMsg:  @0:fromName, @1:fromHost
+/// - LoggerMsg: @0:timestamp, @1:hostname
+/// 
+/// This allows us to use the generated LoggerMsg reader to extract identity 
+/// without needing to manually link or re-generate safe-socket schemas in Rust.
 pub fn identify_client_from_handshake(data: &[u8]) -> Result<String, String> {
     // Note: Handshake is UNPACKED, so we use serialize::read_message
     let reader = serialize::read_message(&mut &data[..], ReaderOptions::new())
@@ -23,20 +32,19 @@ pub fn identify_client_from_handshake(data: &[u8]) -> Result<String, String> {
         .get_root::<capnp_protocol::logger_msg::Reader<'_>>()
         .map_err(|e| format!("handshake root failed: {e}"))?;
 
-    // @0 timestamp (LoggerMsg) -> @0 fromName (HelloMsg)
+    // Extraction (using aliases for clarity)
     let from_name = hello_as_log
-        .get_timestamp()
-        .map_err(|e| format!("get fromName failed: {e}"))?;
+        .get_timestamp() // @0 -> fromName
+        .map_err(|e| format!("failed to extract 'fromName' from handshake: {e}"))?;
 
-    // @1 hostname (LoggerMsg) -> @1 fromHost (HelloMsg)
     let from_host = hello_as_log
-        .get_hostname()
-        .map_err(|e| format!("get fromHost failed: {e}"))?;
+        .get_hostname() // @1 -> fromHost
+        .map_err(|e| format!("failed to extract 'fromHost' from handshake: {e}"))?;
 
     Ok(format!(
         "{}@{}",
-        from_name.to_str().map_err(|e| e.to_string())?,
-        from_host.to_str().map_err(|e| e.to_string())?
+        from_name.to_str().map_err(|e| format!("invalid UTF-8 in fromName: {e}"))?,
+        from_host.to_str().map_err(|e| format!("invalid UTF-8 in fromHost: {e}"))?
     ))
 }
 

@@ -4,6 +4,7 @@
 
 use crate::core::log_formatter::format_log_message;
 use crate::models::log_packet::LogPacket;
+use crate::models::log_entry::LogEntry;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::{
@@ -31,10 +32,10 @@ impl Default for WriterConfig {
     fn default() -> Self {
         Self {
             initial_batch_size: 100,
-            buffer_size: 1024,
+            buffer_size: 2048,
             max_retries: 3,
             retry_delay_ms: 100,
-            max_file_bytes: 1024 * 1024, // 1 MB
+            max_file_bytes: 10 * 1024 * 1024, // 10 MB default
             backup_count: 10,
             gap_timeout_ms: 500,
         }
@@ -101,14 +102,22 @@ impl LogWriter {
     ) -> tokio::io::Result<()> {
         let mut file = File::create(&base_file_path).await?;
         let mut file_size = 0u64;
-        let mut buffer: BTreeMap<u64, crate::models::log_entry::LogEntry> = BTreeMap::new();
+        let mut buffer: BTreeMap<u64, LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
         let mut batch_size = config.initial_batch_size;
         let mut gap_timer = tokio::time::interval(Duration::from_millis(config.gap_timeout_ms));
 
+        // ASYNC CONSOLE WORKER: Prevent blocking the writer task with println!
+        let (console_tx, mut console_rx) = mpsc::channel::<String>(2048);
+        tokio::spawn(async move {
+            while let Some(msg) = console_rx.recv().await {
+                println!("{msg}");
+            }
+        });
+
         loop {
             tokio::select! {
-                // Branch 1: Incoming structured packets (Zero-String Policy)
+                // Branch 1: Incoming structured packets
                 Some(packet) = rx.recv() => {
                     buffer.insert(packet.sequence, packet.entry);
                 }
@@ -118,9 +127,17 @@ impl LogWriter {
                     if !buffer.is_empty() && !buffer.contains_key(&current_sequence) {
                         let next_available = *buffer.keys().next().unwrap();
                         if next_available > current_sequence {
-                            eprintln!("[SEQUENCE_GAP_WARNING] Skipping from {} to {} due to timeout",
-                                current_sequence, next_available);
-                            current_sequence = next_available;
+                            // INSERT SYSTEM GAP: Explicitly notify about lost/delayed data
+                            let gap_entry = LogEntry {
+                                timestamp: chrono::Utc::now().to_rfc3339(),
+                                hostname: "SYSTEM".to_string(),
+                                logger_name: "log-server".to_string(),
+                                level: 9, // WARNING
+                                message: format!("[SEQUENCE_GAP] Missing {} messages ({} to {})", 
+                                    next_available - current_sequence, current_sequence, next_available - 1),
+                                ..Default::default()
+                            };
+                            buffer.insert(current_sequence, gap_entry);
                         }
                     }
                 }
@@ -133,57 +150,39 @@ impl LogWriter {
             while buffer.contains_key(&current_sequence) || buffer.len() >= batch_size {
                 let mut batch = Vec::new();
 
-                // If we hit batch_size but don't have current_sequence, we must force progress
+                // If we hit batch_size but don't have current_sequence, we force progress
                 if !buffer.contains_key(&current_sequence) && buffer.len() >= batch_size {
                     let next_available = *buffer.keys().next().unwrap();
-                    eprintln!(
-                        "[BUFFER_FULL_WARNING] Forcing progress to {} due to buffer pressure",
-                        next_available
-                    );
-                    current_sequence = next_available;
+                    let pressure_entry = LogEntry {
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        hostname: "SYSTEM".to_string(),
+                        logger_name: "log-server".to_string(),
+                        level: 11, // CRITICAL
+                        message: format!("[BUFFER_PRESSURE] Forcing progress to {} (dropping gaps)", next_available),
+                        ..Default::default()
+                    };
+                    buffer.insert(current_sequence, pressure_entry);
                 }
 
                 while let Some(entry) = buffer.remove(&current_sequence) {
-                    // Format for console (with colors)
+                    let level_str = crate::models::log_entry::LEVEL_STRINGS.get(entry.level as usize).unwrap_or(&"UNKNOWN");
+
+                    // Format for console (queued for async print)
                     let console_msg = format_log_message(
-                        &entry.timestamp,
-                        &entry.hostname,
-                        &entry.logger_name,
-                        crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
-                        &entry.module,
-                        &entry.filename,
-                        &entry.function_name,
-                        &entry.line_number,
-                        &entry.message,
-                        &entry.path_name,
-                        &entry.process_id,
-                        &entry.process_name,
-                        &entry.thread_id,
-                        &entry.thread_name,
-                        &entry.service_name,
-                        &entry.stack_trace,
+                        &entry.timestamp, &entry.hostname, &entry.logger_name, level_str,
+                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
+                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
+                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
                         true,
                     );
-                    println!("{console_msg}");
+                    let _ = console_tx.try_send(console_msg);
 
                     // Format for file (no colors)
                     let file_msg = format_log_message(
-                        &entry.timestamp,
-                        &entry.hostname,
-                        &entry.logger_name,
-                        crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
-                        &entry.module,
-                        &entry.filename,
-                        &entry.function_name,
-                        &entry.line_number,
-                        &entry.message,
-                        &entry.path_name,
-                        &entry.process_id,
-                        &entry.process_name,
-                        &entry.thread_id,
-                        &entry.thread_name,
-                        &entry.service_name,
-                        &entry.stack_trace,
+                        &entry.timestamp, &entry.hostname, &entry.logger_name, level_str,
+                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
+                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
+                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
                         false,
                     );
 
@@ -220,24 +219,24 @@ impl LogWriter {
             }
         }
 
-        // Flush remaining messages
+        // Flush remaining messages on exit
         for (_, entry) in buffer {
+            let level_str = crate::models::log_entry::LEVEL_STRINGS.get(entry.level as usize).unwrap_or(&"UNKNOWN");
             let file_msg = format_log_message(
-                &entry.timestamp,
-                &entry.hostname,
-                &entry.logger_name,
-                crate::models::log_entry::LEVEL_STRINGS[entry.level as usize],
-                &entry.module,
-                &entry.filename,
-                &entry.function_name,
+                &entry.timestamp, 
+                &entry.hostname, 
+                &entry.logger_name, level_str,
+                &entry.module, 
+                &entry.filename, 
+                &entry.function_name, 
                 &entry.line_number,
-                &entry.message,
-                &entry.path_name,
-                &entry.process_id,
+                &entry.message, 
+                &entry.path_name, 
+                &entry.process_id, 
                 &entry.process_name,
-                &entry.thread_id,
-                &entry.thread_name,
-                &entry.service_name,
+                &entry.thread_id, 
+                &entry.thread_name, 
+                &entry.service_name, 
                 &entry.stack_trace,
                 false,
             );
@@ -262,11 +261,11 @@ impl LogWriter {
             let mut success = true;
             for data in batch {
                 let log_entry = format!("{data}\n");
-                if file.write_all(log_entry.as_bytes()).await.is_err() {
+                if let Err(_) = file.write_all(log_entry.as_bytes()).await {
                     success = false;
                     break;
                 }
-                *file_size += data.len() as u64;
+                *file_size += log_entry.len() as u64;
             }
 
             if success {

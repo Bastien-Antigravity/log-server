@@ -177,10 +177,24 @@ impl TcpServer {
         });
 
         // 2. Main Message Loop
+        // SECURITY: 60-second read timeout to prune zombie connections (FEAT-005)
+        let read_timeout = Duration::from_secs(60);
 
-        // 3. Main Message Loop
         loop {
-            let bytes_read = reader.receive_data().await?;
+            let bytes_read = match timeout(read_timeout, reader.receive_data()).await {
+                Ok(res) => res?,
+                Err(_) => {
+                    print_internal_log(
+                        "WARNING",
+                        &actual_client_name,
+                        "tcp_server.rs",
+                        "handle_tcp_connection",
+                        line_str!(),
+                        &format!("{actual_client_name} : connection idle for {read_timeout:?}. Pruning zombie."),
+                    );
+                    break;
+                }
+            };
 
             if bytes_read.is_none() {
                 print_internal_log(

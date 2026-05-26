@@ -60,12 +60,13 @@ impl SafeSocketReader {
             }
 
             let mut chunk = BytesMut::with_capacity(slen);
+            let mut buf = [0u8; 8192]; // Reusable stack buffer for chunks
 
             // Read exactly slen bytes
             while chunk.len() < slen {
                 let remaining = slen - chunk.len();
-                let mut buf = vec![0u8; remaining];
-                let n = self.reader.read(&mut buf).await?;
+                let to_read = std::cmp::min(remaining, buf.len());
+                let n = self.reader.read(&mut buf[..to_read]).await?;
                 if n == 0 {
                     return Ok(None);
                 }
