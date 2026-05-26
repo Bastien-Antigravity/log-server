@@ -16,57 +16,24 @@ A high-performance, centralized logging server written in Rust that handles both
 
 ## Features
 
-- **Dual Protocol Support**: Accepts log messages via both TCP (Cap'n Proto) and gRPC
-- **Ordered Message Writing**: Maintains message sequence integrity using sequence numbers
-- **Automatic File Rotation**: Rotates log files based on size with configurable backup count
-- **Async Architecture**: Built on Tokio for high-performance concurrent operations
-- **Dynamic Batching**: Automatically adjusts batch sizes based on message volume
-- **Retry Logic**: Implements retry mechanisms for robust write operations.
-- **Integrated gRPC Support**: Runs both TCP and gRPC server components concurrently.
+- **Dual Protocol Support**: Accepts log messages via both TCP (Cap'n Proto) and gRPC concurrently.
+- **Ordered Message Writing**: Maintains strict sequence integrity using a `BTreeMap` reorder buffer.
+- **Non-Blocking I/O**: Offloads console output to a background task to prevent ingestion stalls.
+- **Memory Optimized**: Reusable stack-based buffers for chunked network reads to minimize heap churn.
+- **Automatic File Rotation**: Rotates log files based on size (10MB) with configurable backup count.
+- **Async Architecture**: Built on Tokio for peak multi-threaded throughput.
+- **Dynamic Batching**: Automatically adjusts batch sizes based on current ingestion volume.
+- **Data Loss Audit**: Automatically logs `[SEQUENCE_GAP]` and `[BUFFER_PRESSURE]` entries if data is lost or delayed.
 
 ## Architecture
 
-```
-log-server/
-├── src/
-│   ├── config/           # Server configuration (Config struct)
-│   ├── facade/           # Primary orchestrators (Facade pattern)
-│   │   ├── log_server.rs    # Main orchestrator (LogServer object)
-│   │   └── log_writer.rs    # File/Console output (LogWriter object)
-│   ├── core/             # Core business logic
-│   │   ├── protocol_handlers.rs # Message processing logic
-│   │   ├── log_formatter.rs # Logfmt/Console formatting
-│   │   └── reorder_test.rs  # In-code unit tests for sequencing
-│   ├── models/           # Data definitions
-│   │   └── log_entry.rs     # Central LogEntry model
-│   ├── servers/          # Network entry points
-│   │   ├── tcp_server.rs    # Cap'n Proto socket server
-│   │   └── grpc_server.rs   # Tonic gRPC server
-│   ├── transport/        # Low-level communication
-│   │   └── safe_socket.rs   # TCP framing and socket management
-│   ├── protocols/        # Protocol schemas and generated code
-│   │   └── capnp/           # Cap'n Proto generated code
-│   ├── schema/           # Protocol schema sources
-│   │   ├── capnp/
-│   │   │   └── logger.capnp # Cap'n Proto binary serialization schema
-│   │   └── proto/
-│   │       └── log_service.proto # gRPC network schema
-│   ├── utils/
-│   │   ├── terminal_ui.rs   # ANSI coloring and terminal helpers
-│   │   └── helpers.rs       # IO and string utilities
-│   ├── main.rs           # Entry point binary
-│   └── lib.rs            # Library entry
-├── Dockerfile            # Container definition
-└── docker-compose.yml    # Multi-container orchestration
-```
+For a detailed technical deep-dive, please refer to [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 🛡️ Feature Specs & Governance (BDD)
-The behavior of this microservice is governed by strict specifications in the **[[business-bdd-brain|Business-Specs Brain]]**:
-- **TCP Ingestion (Cap'n Proto)**: [[FEAT-001-TCP-Ingestion-Capnp|FEAT-001: High-throughput Ingestion]]
-- **Atomic Ordering**: [[FEAT-002-Atomic-Ordering|FEAT-002: Zero-drift Message Sequencing]]
-- **Dynamic Batching**: [[FEAT-003-Dynamic-Batching|FEAT-003: Performance-optimized Flushing]]
-- **Rotation Strategy**: [[FEAT-004-Rotation-Strategy|FEAT-004: Storage-safe File Rotation]]
-- **Heartbeat Liveness**: [[FEAT-005-Heartbeat-Liveness|FEAT-005: Resilient Node Tracking]]
+The project is structured as follows:
+
+- **Network Layer**: High-performance ingestors for TCP (Cap'n Proto) and gRPC.
+- **Core Core**: Ordering sequencer and reorder buffer.
+- **Persistence Layer**: Ordered file writer with rotation and non-blocking console output.
 
 ## Installation
 
@@ -82,299 +49,36 @@ The behavior of this microservice is governed by strict specifications in the **
 cargo build --release
 ```
 
-### Docker Usage
-
-You can also run the Log Server using Docker or Docker Compose.
-
-#### Docker Compose (Recommended)
-
-```bash
-docker compose up -d
-```
-
-#### Docker Build & Run
-
-```bash
-# Build the image
-docker build -t log-server .
-
-# Run the container
-docker run -d -p 9020:9020 -v $(pwd)/logs:/log-server/logs log-server
-```
-
 ## Usage
-
-### Basic Usage
-
-```bash
-# Start server with default settings
-./log-server
-
-# Start with custom configuration
-./log-server --name MyLogServer --host 0.0.0.0
-```
-
-### Command-Line Options
-
-Note: Full configuration uses the standard `microservice-toolbox` address resolution, taking precedence via the `.env` or process environment variables if defined.
-
-| Option          | Default      | Description                            |
-|-----------------|--------------|----------------------------------------|
-| `--name`        | `log-server` | Server instance name                   |
-| `--host`        | `0.0.0.0`    | Host address to bind to                |
-| `--port`        | `9020`       | Port number to bind to (TCP)           |
-| `--grpc_host`   | `0.0.0.0`    | Host address for Log Bridge to bind to |
-| `--grpc_port`   | `9021`       | Port number for Log Bridge to bind to  |
-
-## Message Format
 
 ### TCP Protocol (Hardened)
 
-The TCP server (Port 9020) enforces a strict communication protocol:
-
-1.  **Framing**: Every message must be prefixed with a **4-byte Big-Endian length** field.
-2.  **Handshake**: Immediately upon connection, the client must send a `HelloMsg` (Cap'n Proto). Failure to provide identity results in immediate disconnection.
-3.  **Serialization**: Packed Cap'n Proto is used for log entries.
+The TCP server (Port 9020) enforces a strict protocol:
+1.  **Framing**: 4-byte Big-Endian length prefix.
+2.  **Handshake**: Mandatory `HelloMsg` identity exchange on connection.
+3.  **Security**: 60-second read timeout to prune zombie connections.
 
 ### Log Bridge (gRPC)
 
-The Log Bridge (Port 9021) provides a gRPC gateway for environments without raw TCP access (e.g., Web/JS).
-
-### Cap'n Proto Schema
-
-```capnp
-struct LoggerMsg {
-  timestamp @0 :Text;
-  hostname @1 :Text;
-  loggerName @2 :Text;
-  module @3 :Text;
-  level @4 :Level;
-  filename @5 :Text;
-  functionName @6 :Text;
-  lineNumber @7 :Text;
-  message @8 :Text;
-  pathName @9 :Text;
-  processId @10 :Text;
-  processName @11 :Text;
-  threadId @12 :Text;
-  threadName @13 :Text;
-  serviceName @14 :Text;
-  stackTrace @15 :Text;
-}
-
-enum Level {
-  notset @0;
-  debug @1;
-  stream @2;
-  info @3;
-  logon @4;
-  logout @5;
-  trade @6;
-  schedule @7;
-  report @8;
-  warning @9;
-  error @10;
-  critical @11;
-}
-```
-
-### gRPC Protocol
-
-The gRPC server uses the `src/schema/proto/log_service.proto` definition.
-
-```protobuf
-service LogService {
-  rpc LogMessage(LogRequest) returns (LogResponse);
-}
-
-message LogRequest {
-  string timestamp = 1;
-  string hostname = 2;
-  string logger_name = 3;
-  string module = 4;
-  Level level = 5;
-  string filename = 6;
-  string function_name = 7;
-  string line_number = 8;
-  string message = 9;
-  string path_name = 10;
-  string process_id = 11;
-  string process_name = 12;
-  string thread_id = 13;
-  string thread_name = 14;
-  string service_name = 15;
-  string stack_trace = 16;
-}
-
-enum Level {
-  NOTSET = 0;
-  DEBUG = 1;
-  STREAM = 2;
-  INFO = 3;
-  LOGON = 4;
-  LOGOUT = 5;
-  TRADE = 6;
-  SCHEDULE = 7;
-  REPORT = 8;
-  WARNING = 9;
-  ERROR = 10;
-  CRITICAL = 11;
-}
-```
-
-
-### Output Format
-
-Log messages are formatted with fixed-width columns for readability:
-
-```
-<timestamp> <hostname> <logger_name> <level> <filename> <function_name> <line_number> <message> <[metadata: extra=extra-data]>
-```
-
-Example:
-```
-2026-04-14T10:30:45.127456789Z myhost       log-server             INFO  tcp_server.rs        run                       48     log-server : TCP server listening on 127.0.0.1:9020 [metadata: mod=log-server]
-```
+The Log Bridge (Port 9021) provides a gRPC gateway for structured logging via `LogService`.
 
 ## Configuration
 
-### Writer Configuration
+Writer settings in `src/facade/log_writer.rs`:
+- `max_file_bytes`: 10MB default.
+- `gap_timeout_ms`: 500ms before triggering a synthetic gap entry.
+- `buffer_size`: 2048 packets.
 
-The log writer can be configured in `src/core/log_writer.rs`:
+## Project Structure
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `initial_batch_size` | `100` | Initial number of messages per write batch |
-| `buffer_size` | `1024` | Channel buffer size for incoming messages |
-| `max_retries` | `3` | Number of write retry attempts on failure |
-| `retry_delay_ms` | `100` | Delay between retries in milliseconds |
-| `max_file_bytes` | `1MB` | Maximum file size before rotation |
-| `backup_count` | `10` | Number of rotated backup files to keep |
-
-### Log File Location
-
-Log files are stored in the `logs/` directory relative to the executable:
-
-- `logs/_main.log` - Current log file
-- `logs/_main.log.0` through `logs/_main.log.9` - Rotated backups
-
-## How It Works
-
-### Message Flow
-
-1. **Reception**: Messages arrive via TCP (Cap'n Proto) or gRPC
-2. **Sequencing**: Each message is assigned a unique sequence number
-3. **Buffering**: Messages are buffered in a `BTreeMap` ordered by sequence number
-4. **Batch Processing**: Messages are written in strict order once a batch is ready or a timeout occurs
-5. **File Rotation**: When the current file exceeds the size limit, it is rotated automatically
-
-### Ordered Writing
-
-The server ensures messages are written in strict chronological order based on when they were received:
-
-- Uses sequence numbers to track the exact arrival order
-- Buffers out-of-order messages until gaps are filled
-- Dynamically adjusts batch size based on buffer depth
-- Guarantees no message reordering in the final output file
-
-### TCP Message Framing
-
-For TCP (Cap'n Proto), a simple framing protocol is used:
-- **Length Prefix**: 4-byte big-endian unsigned integer (message size)
-- **Payload**: Variable-length Cap'n Proto packed message
-
-## API
-
-### TCP (Cap'n Proto) Client
-
-Clients should use the `src/schema/capnp/logger.capnp` schema. Messages must be serialized using Cap'n Proto's "packed" format and prefixed with a 4-byte big-endian length.
-
-### gRPC Client
-
-Clients can use the `src/schema/proto/log_service.proto` definition. The service name is `LogService` and the method is `LogMessage`.
-
-## Performance Characteristics
-
-- **Async I/O**: Non-blocking operations using Tokio
-- **Dynamic Batching**: Adapts to load (10-1000 messages per batch)
-- **Connection Pooling**: Handles multiple concurrent clients
-- **Buffered Writes**: Minimizes disk I/O operations
-- **Retry Logic**: Ensures message durability
-
-## Error Handling
-
-The server handles various error conditions:
-
-- **Connection Errors**: Logs and closes problematic connections
-- **Deserialization Errors**: Rejects malformed messages
-- **Write Failures**: Retries with exponential backoff
-- **Disk Full**: Gracefully handles I/O errors
-
-## Logging
-
-Server operational logs are printed to stdout/stderr:
-
-```text
-2026-04-14T10:30:45.123456789Z myhost       log-server             INFO  main.rs              main                      40     log-server : starting log server [metadata: mod=log-server]
-2026-04-14T10:30:45.124456789Z myhost       log-server             INFO  main.rs              main                      49     log-server : gRPC server enabled [metadata: mod=log-server]
-2026-04-14T10:30:45.125456789Z myhost       log-server             INFO  log_server.rs        run                       52     log-server : starting server components. .  . [metadata: mod=log-server]
-2026-04-14T10:30:45.126456789Z myhost       log-server             INFO  log_server.rs        run                       70     log-server : internal logger initialized - writer(s) ready ! [metadata: mod=log-server]
-2026-04-14T10:30:45.127456789Z myhost       log-server             INFO  tcp_server.rs        run                       48     log-server : TCP server listening on 127.0.0.1:9020 [metadata: mod=log-server]
-2026-04-14T10:30:45.128456789Z myhost       log-server             INFO  grpc_server.rs       run                       63     log-server : gRPC server listening on 127.0.0.1:9021 [metadata: mod=log-server]
-2026-04-14T10:30:45.129456789Z myhost       log-server             INFO  log_server.rs        run                       122    log-server : all server components started ! [metadata: mod=log-server]
-```
-
-## Development
-
-### Building from Source
-
-```bash
-# Debug build
-cargo build
-
-# Release build with optimizations
-cargo build --release
-
-# Run tests
-cargo test
-
-# Check code
-cargo clippy
-```
-
-### Project Structure
-
-- `src/config/`: Server configuration (Config struct)
-- `src/facade/`: Primary orchestrators (Facade pattern)
-- `src/core/`: Core business logic (protocol_handlers, log_formatter, reorder_test)
-- `src/models/`: Internal data models
-- `src/servers/`: Network protocol entry points (TCP, gRPC)
-- `src/transport/`: Low-level communication logic
-- `src/protocols/`: Generated code bindings
-- `src/schema/`: Protocol schema sources (Cap'n Proto & Protobuf)
-- `src/utils/`: Terminal UI and helper functions
+- `src/facade/`: Main orchestrators (`LogServer`, `LogWriter`).
+- `src/servers/`: Protocol ingestors (`TcpServer`, `GrpcServer`).
+- `src/transport/`: Optimized networking (`SafeSocket`).
+- `src/core/`: Protocol handlers and ordering logic.
+- `src/schema/`: Cap'n Proto and Protobuf definitions.
 
 ## 🛡️ Testing & Verification
-All testing for the **log-server** is governed by the **Spec-First Protocol**. For the full list of behavioral test scenarios, validation results, and Gherkin specs, refer to the **[Feature Specs & Governance](#-feature-specs--governance-bdd)** section above.
-
-To run the local test suite:
 ```bash
 cargo test
 ```
-
-## 🛠️ CI/CD Integration
-Every change is automatically validated via GitHub Actions:
-- **Linting**: `cargo clippy` enforces best practices.
-- **Formatting**: `cargo fmt` ensures style consistency.
-- **Automated Testing**: The full test suite must pass before code can be merged.
-
-## Dependencies
-
-Key dependencies:
-- `tokio`: Async runtime
-- `capnp`: Cap'n Proto serialization
-- `tonic`: gRPC framework
-- `bytes`: Byte buffer utilities
-- `clap`: Command-line argument parsing
-- `chrono`: Timestamp handling
-
+All components are verified via the **Spec-First Protocol**.
