@@ -8,7 +8,7 @@ use crate::models::log_entry::LogEntry;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::AsyncWriteExt,
     sync::mpsc,
     time::{sleep, Duration},
@@ -100,8 +100,13 @@ impl LogWriter {
         base_file_path: PathBuf,
         config: WriterConfig,
     ) -> tokio::io::Result<()> {
-        let mut file = File::create(&base_file_path).await?;
-        let mut file_size = 0u64;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&base_file_path)
+            .await?;
+            
+        let mut file_size = file.metadata().await?.len();
         let mut buffer: BTreeMap<u64, LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
         let mut batch_size = config.initial_batch_size;
@@ -200,7 +205,11 @@ impl LogWriter {
                     if file_size >= config.max_file_bytes {
                         file.flush().await?;
                         Self::rotate_files(&base_file_path, config.backup_count).await?;
-                        file = File::create(&base_file_path).await?;
+                        file = OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&base_file_path)
+                            .await?;
                         file_size = 0;
                     }
                     file.flush().await?;
