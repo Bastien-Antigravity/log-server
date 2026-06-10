@@ -8,7 +8,7 @@ services:
     container_name: log-server
     restart: unless-stopped
     ports:
-      - "127.0.0.2:${LG_PORT:-9020}:${LG_PORT:-9020}"
+      - "${LS_IP:-127.0.0.1}:${LS_PORT:-9020}:${LS_PORT:-9020}"
     networks:
       - teleremote-network
     labels: [ com.centurylinklabs.watchtower.enable=true ]

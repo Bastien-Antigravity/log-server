@@ -28,16 +28,17 @@ pub fn format_log_message(
     let display_level = if use_color {
         crate::utils::terminal_ui::colorize_level(level)
     } else {
-        level.to_string()
+        format!("{:<10}", truncate(level, 10))
     };
 
     // 1. Basic 8 columns (Fixed width)
+    // Note: display_level already contains padding and ANSI codes if use_color is true
     let base = format!(
-        "{:<33} {:<12} {:<22} {:<10} {:<20} {:<25} {:<6} {}",
+        "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {}",
         timestamp,
         truncate(hostname, 12),
         truncate(logger_name, 22),
-        truncate(&display_level, 10),
+        display_level,
         truncate(filename, 20),
         truncate(function_name, 25),
         truncate(line_number, 6),
