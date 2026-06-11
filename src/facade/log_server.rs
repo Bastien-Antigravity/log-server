@@ -56,7 +56,7 @@ impl LogServer {
             "log_server.rs",
             "run",
             line_str!(),
-            &format!("{} : starting server components. .  .", self.name),
+            &format!("starting server components. .  ."),
         );
 
         // Start a single writer task for all components to share
@@ -74,31 +74,30 @@ impl LogServer {
             "log_server.rs",
             "run",
             line_str!(),
-            &format!(
-                "{} : internal logger initialized - writer(s) ready !",
-                self.name
-            ),
+            &format!("internal logger initialized - writer(s) ready !"),
         );
 
         // Start TCP server (always)
         let tcp_server = TcpServer::new(&self.config);
         let tcp_writer_tx = writer_tx.clone();
         let tcp_sequence_counter = sequence_counter.clone();
+        let identity = self.name.clone();
 
         let tcp_handle = tokio::spawn(async move {
             if let Err(e) = tcp_server.run(tcp_writer_tx, tcp_sequence_counter).await {
                 print_internal_log(
                     "ERROR",
-                    tcp_server.name(),
+                    &identity,
                     "log_server.rs",
                     "run",
                     line_str!(),
-                    &format!("{} : TCP server error: {e}", tcp_server.name()),
+                    &format!("TCP server error: {e}"),
                 );
             }
         });
 
         // Conditionally start gRPC bridge gateway
+        let identity_grpc = self.name.clone();
         let grpc_handle = if self.enable_grpc {
             let grpc_server = LogBridgeGateway::new(&self.config);
             let grpc_writer_tx = writer_tx.clone();
@@ -108,7 +107,7 @@ impl LogServer {
                 if let Err(e) = grpc_server.run(grpc_writer_tx, grpc_sequence_counter).await {
                     print_internal_log(
                         "ERROR",
-                        grpc_server.name(),
+                        &identity_grpc,
                         "log_server.rs",
                         "run",
                         line_str!(),
@@ -126,7 +125,7 @@ impl LogServer {
             "log_server.rs",
             "run",
             line_str!(),
-            &format!("{} : all server components started !", self.name),
+            &format!("all server components started !"),
         );
 
         // Wait for servers to complete

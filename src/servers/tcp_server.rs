@@ -54,7 +54,7 @@ impl TcpServer {
             "tcp_server.rs",
             "run",
             line_str!(),
-            &format!("{} : TCP server listening on {}", self.config.name, addr),
+            &format!("TCP server listening on {}", addr),
         );
 
         // Main server loop
@@ -62,20 +62,21 @@ impl TcpServer {
             let (socket, addr) = listener.accept().await?;
             let writer_tx = writer_tx.clone();
             let sequence_counter = sequence_counter.clone();
-            let client_name = format!("{name}_client_{addr}", name = self.config.name, addr = addr);
+            let client_address = format!("{addr}", addr = addr);
             let server_name = self.config.name.clone();
+
             tokio::spawn(async move {
                 if let Err(e) =
-                    Self::handle_tcp_connection(socket, writer_tx, sequence_counter, &server_name)
+                    Self::handle_tcp_connection(socket, writer_tx, sequence_counter, &client_address, &server_name)
                         .await
                 {
                     print_internal_log(
                         "ERROR",
-                        &client_name,
+                        &server_name,
                         "tcp_server.rs",
                         "run",
                         line_str!(),
-                        &format!("{client_name} : connection handler failed: {e}"),
+                        &format!("[client: {client_address}] connection handler failed: {e}"),
                     );
                 }
             });
@@ -89,7 +90,8 @@ impl TcpServer {
         socket: TcpStream,
         writer_tx: mpsc::Sender<LogPacket>,
         sequence_counter: Arc<AtomicU64>,
-        name: &str,
+        client_initial_name: &str,
+        server_name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let peer_addr = socket.peer_addr()?;
         let local_addr = socket.local_addr()?;
@@ -103,11 +105,11 @@ impl TcpServer {
 
         print_internal_log(
             "INFO",
-            name,
+            server_name,
             "tcp_server.rs",
             "handle_tcp_connection",
             line_str!(),
-            &format!("{name} : TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
+            &format!("[client: {client_initial_name}] TCP connection established from '{peer_ip}' port '{peer_port}' to host '{local_ip}' port '{local_port}'"),
         );
 
         // 1. Initial Handshake / Identity Detection (Mandatory - FEAT-006)
@@ -116,7 +118,7 @@ impl TcpServer {
             Ok(res) => res?,
             Err(_) => {
                 return Err(format!(
-                    "{name} : handshake timeout from {peer_ip}. Closing connection."
+                    "handshake timeout from {peer_ip}. Closing connection."
                 )
                 .into())
             }
@@ -127,24 +129,24 @@ impl TcpServer {
             // Unpacked Cap'n Proto messages (like HelloMsg) start with segment count 0 (4 zero bytes)
             if data.len() >= 4 && data[0..4] == [0, 0, 0, 0] {
                 if let Ok(identity) = identify_client_from_handshake(&data) {
-                    actual_client_name = format!("{name}_{identity}");
+                    actual_client_name = identity.clone();
                     print_internal_log(
                         "INFO",
-                        name,
+                        server_name,
                         "tcp_server.rs",
                         "handle_tcp_connection",
                         line_str!(),
-                        &format!("{name} : client identified via handshake as '{identity}'"),
+                        &format!("[client: {actual_client_name}] client identified via handshake"),
                     );
                 } else {
                     return Err(format!(
-                        "{name} : malformed handshake received from {peer_ip}. Closing connection."
+                        "malformed handshake received from {peer_ip}. Closing connection."
                     )
                     .into());
                 }
             } else {
                 return Err(format!(
-                    "{name} : mandatory handshake skipped by {peer_ip}. Closing connection."
+                    "mandatory handshake skipped by {peer_ip}. Closing connection."
                 )
                 .into());
             }
@@ -154,6 +156,7 @@ impl TcpServer {
 
         // Spawn background heartbeat task (every 10 seconds)
         let heartbeat_client_name = actual_client_name.clone();
+        let heartbeat_server_name = server_name.to_string();
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
@@ -164,11 +167,11 @@ impl TcpServer {
                     {
                         print_internal_log(
                             "DEBUG",
-                            &heartbeat_client_name,
+                            &heartbeat_server_name,
                             "tcp_server.rs",
                             "heartbeat_task",
                             line_str!(),
-                            &format!("Heartbeat failed for {heartbeat_client_name}: {e}"),
+                            &format!("[client: {heartbeat_client_name}] Heartbeat failed: {e}"),
                         );
                     }
                     break;
@@ -186,11 +189,11 @@ impl TcpServer {
                 Err(_) => {
                     print_internal_log(
                         "WARNING",
-                        &actual_client_name,
+                        server_name,
                         "tcp_server.rs",
                         "handle_tcp_connection",
                         line_str!(),
-                        &format!("{actual_client_name} : connection idle for {read_timeout:?}. Pruning zombie."),
+                        &format!("[client: {actual_client_name}] connection idle for {read_timeout:?}. Pruning zombie."),
                     );
                     break;
                 }
@@ -199,11 +202,11 @@ impl TcpServer {
             if bytes_read.is_none() {
                 print_internal_log(
                     "INFO",
-                    &actual_client_name,
+                    server_name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
                     line_str!(),
-                    &format!("{actual_client_name} : TCP connection has been closed"),
+                    &format!("[client: {actual_client_name}] TCP connection has been closed"),
                 );
                 break;
             }
@@ -220,11 +223,11 @@ impl TcpServer {
             {
                 print_internal_log(
                     "ERROR",
-                    &actual_client_name,
+                    server_name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
                     line_str!(),
-                    &format!("{actual_client_name} : message handling failed: {e}"),
+                    &format!("[client: {actual_client_name}] message handling failed: {e}"),
                 );
                 break;
             }

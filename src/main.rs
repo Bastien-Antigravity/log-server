@@ -19,6 +19,7 @@ fn main() {
     };
 
     let name = ac.cli_args.name.as_deref().unwrap_or("log-server");
+    let identity = name.to_string();
 
     let default_host = ac.cli_args.host.as_deref().unwrap_or("0.0.0.0");
     let default_port = ac.cli_args.port.unwrap_or(9020);
@@ -28,11 +29,11 @@ fn main() {
 
     print_internal_log(
         "INFO",
-        name,
+        &identity,
         "main.rs",
         "main",
         line_str!(),
-        &format!("{name} : starting log server with profile: {}", ac.profile),
+        &format!("starting log server with profile: {}", ac.profile),
     );
 
     let default_grpc_host = ac.cli_args.grpc_host.as_deref().unwrap_or(default_host);
@@ -56,23 +57,23 @@ fn main() {
     if enable_grpc {
         print_internal_log(
             "INFO",
-            name,
+            &identity,
             "main.rs",
             "main",
             line_str!(),
-            &format!("{name} : Log Bridge enabled"),
+            &format!("Log Bridge enabled"),
         );
     }
 
     // Run the server
-    if let Err(e) = run_server(name, host, port, grpc_port, enable_grpc) {
+    if let Err(e) = run_server(&identity, host, port, grpc_port, enable_grpc) {
         print_internal_log(
             "ERROR",
-            name,
+            &identity,
             "main.rs",
             "main",
             line_str!(),
-            &format!("{name} : server starting failed - {e}"),
+            &format!("server starting failed - {e}"),
         );
         std::process::exit(1);
     }

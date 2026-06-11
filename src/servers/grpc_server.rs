@@ -68,7 +68,7 @@ impl LogBridgeGateway {
             "grpc_server.rs",
             "run",
             line_str!(),
-            &format!("{} : Log Bridge listening on {}", self.config.name, addr),
+            &format!("Log Bridge listening on {}", addr),
         );
 
         Server::builder()
@@ -84,9 +84,9 @@ impl LogBridgeGateway {
 
 /// gRPC bridge service implementation
 pub struct LogBridgeServiceImpl {
+    server_name: String,
     writer_tx: mpsc::Sender<LogPacket>,
     sequence_counter: Arc<AtomicU64>,
-    name: String,
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -99,9 +99,9 @@ impl LogBridgeServiceImpl {
         sequence_counter: Arc<AtomicU64>,
     ) -> Self {
         Self {
+            server_name: config.name.clone(),
             writer_tx,
             sequence_counter,
-            name: config.name.clone(),
         }
     }
 }
@@ -135,15 +135,11 @@ impl LogBridge for LogBridgeServiceImpl {
             Err(e) => {
                 print_internal_log(
                     "ERROR",
-                    &self.name,
+                    &self.server_name,
                     "grpc_server.rs",
                     "log_message",
                     line_str!(),
-                    &format!(
-                        "{client_id} : failed to process gRPC message: {e}",
-                        client_id = client_id,
-                        e = e
-                    ),
+                    &format!("[client: {client_id}] failed to process gRPC message: {e}"),
                 );
                 Err(Status::internal(format!(
                     "Failed to process log message: {e}"

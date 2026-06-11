@@ -21,6 +21,8 @@ A high-performance, centralized logging server written in Rust that handles both
 - **Non-Blocking I/O**: Offloads console output to a background task to prevent ingestion stalls.
 - **Memory Optimized**: Reusable stack-based buffers for chunked network reads to minimize heap churn.
 - **Automatic File Rotation**: Rotates log files based on size (10MB) with configurable backup count.
+- **Append-Only Durability**: Opens log files in **Append Mode**, ensuring data is preserved across server restarts.
+- **Colorized Level Support**: Console output highlights log levels with isolated coloring and automatic ANSI reset.
 - **Async Architecture**: Built on Tokio for peak multi-threaded throughput.
 - **Dynamic Batching**: Automatically adjusts batch sizes based on current ingestion volume.
 - **Data Loss Audit**: Automatically logs `[SEQUENCE_GAP]` and `[BUFFER_PRESSURE]` entries if data is lost or delayed.
