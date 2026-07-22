@@ -2,6 +2,9 @@
 tags:
 - '#ai/ignore'
 - '#zone/3-fleet'
+- '#service/log-server'
+- '#type/features-behavior'
+- '#state/active'
 microservice: log-server
 type: features-behavior
 status: active

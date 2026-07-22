@@ -2,6 +2,9 @@
 tags:
 - '#ai/ignore'
 - '#zone/3-fleet'
+- '#service/log-server'
+- '#type/architecture-overview'
+- '#state/active'
 microservice: log-server
 type: architecture-overview
 status: active

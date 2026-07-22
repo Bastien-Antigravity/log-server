@@ -2,6 +2,9 @@
 tags:
 - '#ai/ignore'
 - '#zone/3-fleet'
+- '#service/log-server'
+- '#type/operations-manual'
+- '#state/active'
 microservice: log-server
 type: operations-manual
 status: active

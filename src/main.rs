@@ -18,11 +18,11 @@ fn main() {
         }
     };
 
-    let name = ac.cli_args.name.as_deref().unwrap_or("log-server");
+    let name = ac.cli_args.name.as_deref().unwrap_or("log_server");
     let identity = name.to_string();
 
     let default_host = ac.cli_args.host.as_deref().unwrap_or("0.0.0.0");
-    let default_port = ac.cli_args.port.unwrap_or(9020);
+    let default_port = ac.cli_args.port.unwrap_or(3314);
     let listen_addr = ac
         .get_listen_addr(name)
         .unwrap_or_else(|_| format!("{}:{}", default_host, default_port));

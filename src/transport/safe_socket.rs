@@ -54,9 +54,9 @@ impl SafeSocketReader {
                 ));
             }
 
-            // HEARTBEAT: If length is 0, skip and wait for next frame
+            // HEARTBEAT: If length is 0, return an empty BytesMut to let the caller handle it (e.g. reset timeouts)
             if slen == 0 {
-                continue;
+                return Ok(Some(BytesMut::new()));
             }
 
             let mut chunk = BytesMut::with_capacity(slen);
@@ -150,8 +150,11 @@ mod tests {
         let safe_socket = SafeSocket::new(client_stream);
         let (mut reader, _) = safe_socket.split();
 
-        // receive_data should skip the heartbeat and return "HELLO"
-        let data = reader.receive_data().await.unwrap().unwrap();
+        // receive_data should return an empty BytesMut for the heartbeat
+        let mut data = reader.receive_data().await.unwrap().unwrap();
+        while data.is_empty() {
+            data = reader.receive_data().await.unwrap().unwrap();
+        }
         assert_eq!(data.as_ref(), b"HELLO");
 
         server_task.await.unwrap();

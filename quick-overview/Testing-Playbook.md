@@ -2,6 +2,9 @@
 tags:
 - '#ai/ignore'
 - '#zone/3-fleet'
+- '#service/log-server'
+- '#type/testing-playbook'
+- '#state/active'
 microservice: log-server
 type: testing-playbook
 status: active

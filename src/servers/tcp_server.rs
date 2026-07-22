@@ -213,6 +213,11 @@ impl TcpServer {
 
             let data = bytes_read.unwrap().to_vec();
 
+            if data.is_empty() {
+                // Heartbeat frame. Loop again to reset the read timeout.
+                continue;
+            }
+
             if let Err(e) = handle_tcp_message(
                 data,
                 writer_tx.clone(),
