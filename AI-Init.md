@@ -2,6 +2,11 @@
 microservice: log-server
 type: governance
 status: active
+tags:
+- '#service/log-server'
+- '#type/governance'
+- '#state/active'
+- '#zone/3-fleet'
 ---
 
 # ⚡ AI Initialization: log-server
