@@ -2,8 +2,8 @@ services:
   # --- Infrastructure ---
   log-server:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: log-server/Dockerfile
     image: ghcr.io/bastien-antigravity/log-server:${TAG:-latest}
     container_name: log-server
     restart: unless-stopped
