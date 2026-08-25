@@ -1,6 +1,8 @@
 # === BUILD STAGE ===
 FROM rust:1.91-alpine AS builder
 
+LABEL org.opencontainers.image.source="https://github.com/Bastien-Antigravity/log-server"
+
 # Install build dependencies including protoc
 RUN apk add --no-cache \
     musl-dev \
