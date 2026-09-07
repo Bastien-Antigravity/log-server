@@ -22,7 +22,7 @@ fn main() {
     let identity = name.to_string();
 
     let default_host = ac.cli_args.host.as_deref().unwrap_or("0.0.0.0");
-    let default_port = ac.cli_args.port.unwrap_or(3314);
+    let default_port = ac.cli_args.port.unwrap_or(9020);
     let listen_addr = ac
         .get_listen_addr(name)
         .unwrap_or_else(|_| format!("{}:{}", default_host, default_port));

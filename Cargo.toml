@@ -10,7 +10,7 @@ capnp = "0.19"
 clap = { version = "4.0", features = ["derive"] }
 bytes = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-microservice-toolbox = { git = "https://github.com/Bastien-Antigravity/microservice-toolbox", branch = "develop" }
+microservice-toolbox = { path = "../microservice-toolbox/rust" }
 tonic = "0.9"
 prost = "0.11"
 tokio-stream = "0.1"
