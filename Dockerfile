@@ -3,8 +3,9 @@ FROM rust:1.91-alpine AS builder
 
 LABEL org.opencontainers.image.source="https://github.com/Bastien-Antigravity/log-server"
 
-# Install build dependencies including protoc
+# Install build dependencies including protoc and git
 RUN apk add --no-cache \
+    git \
     musl-dev \
     capnproto \
     protobuf-dev \
