@@ -124,25 +124,16 @@ impl LogWriter {
             tokio::select! {
                 // Branch 1: Incoming structured packets
                 Some(packet) = rx.recv() => {
-                    buffer.insert(packet.sequence, packet.entry);
+                    if packet.sequence >= current_sequence {
+                        buffer.insert(packet.sequence, packet.entry);
+                    }
                 }
 
                 // Branch 2: Gap Timeout / Periodic Flush
                 _ = gap_timer.tick() => {
-                    if !buffer.is_empty() && !buffer.contains_key(&current_sequence) {
-                        let next_available = *buffer.keys().next().unwrap();
+                    if let Some(&next_available) = buffer.keys().next() {
                         if next_available > current_sequence {
-                            // INSERT SYSTEM GAP: Explicitly notify about lost/delayed data
-                            let gap_entry = LogEntry {
-                                timestamp: chrono::Utc::now().to_rfc3339(),
-                                hostname: "SYSTEM".to_string(),
-                                logger_name: "log-server".to_string(),
-                                level: 9, // WARNING
-                                message: format!("[SEQUENCE_GAP] Missing {} messages ({} to {})", 
-                                    next_available - current_sequence, current_sequence, next_available - 1),
-                                ..Default::default()
-                            };
-                            buffer.insert(current_sequence, gap_entry);
+                            current_sequence = next_available;
                         }
                     }
                 }
@@ -158,15 +149,12 @@ impl LogWriter {
                 // If we hit batch_size but don't have current_sequence, we force progress
                 if !buffer.contains_key(&current_sequence) && buffer.len() >= batch_size {
                     let next_available = *buffer.keys().next().unwrap();
-                    let pressure_entry = LogEntry {
-                        timestamp: chrono::Utc::now().to_rfc3339(),
-                        hostname: "SYSTEM".to_string(),
-                        logger_name: "log-server".to_string(),
-                        level: 11, // CRITICAL
-                        message: format!("[BUFFER_PRESSURE] Forcing progress to {} (dropping gaps)", next_available),
-                        ..Default::default()
-                    };
-                    buffer.insert(current_sequence, pressure_entry);
+                    if next_available > current_sequence {
+                        let warn_msg = format!("[BUFFER_PRESSURE] Forcing progress to {} (dropping gaps)", next_available);
+                        let _ = console_tx.try_send(warn_msg.clone());
+                        batch.push(warn_msg);
+                        current_sequence = next_available;
+                    }
                 }
 
                 while let Some(entry) = buffer.remove(&current_sequence) {
