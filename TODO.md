@@ -1,13 +1,15 @@
 ---
-microservice: 08-Base-Scripts
-type: note
+microservice: log-server
+type: todo
 status: active
 tags:
-- '#service/08-Base-Scripts'
-- '#type/note'
+- '#service/log-server'
+- '#type/todo'
 - '#state/active'
-- '#zone/3-fleet'
----# Log Server TODO
+- '#zone/1-core'
+---
+
+# Log Server TODO
 
 ## 🛡️ Hardening (Spec-First)
 - [x] **Ingestion Gap Protection**: Implement a 500ms timeout for missing sequence IDs in `LogWriter` (FEAT-002).

@@ -3,15 +3,17 @@
 - Classification: Level 1 Microservice
 
 ---
-microservice: 08-Base-Scripts
+microservice: log-server
 type: note
 status: active
 tags:
-- '#service/08-Base-Scripts'
+- '#service/log-server'
 - '#type/note'
 - '#state/active'
-- '#zone/3-fleet'
----# 🧬 Project DNA: log-server
+- '#zone/1-core'
+---
+
+# 🧬 Project DNA: log-server
 
 ## 🎯 High-Level Intent (BDD)
 - **Goal**: High-performance log aggregation and storage using Rust and Cap'n Proto.
