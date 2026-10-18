@@ -29,8 +29,9 @@ RUN apk add --no-cache \
 
 WORKDIR /log-server
 
-# Copy the binary from the build stage
+# Copy the binary and VERSION.txt from the build stage
 COPY --from=builder /log-server/target/release/log-server /log-server/log-server
+COPY --from=builder /log-server/VERSION.txt /log-server/VERSION.txt
 
 # Make binary executable
 RUN chmod +x /log-server/log-server
