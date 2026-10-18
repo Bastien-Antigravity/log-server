@@ -7,7 +7,7 @@ use log_server::facade::log_server::LogServer;
 use log_server::line_str;
 use log_server::utils::terminal_ui::print_internal_log;
 
-//================================================================
+pub const VERSION: &str = env!("APP_VERSION");
 
 fn main() {
     let ac = match microservice_toolbox::config::load_config("standalone") {
@@ -33,7 +33,7 @@ fn main() {
         "main.rs",
         "main",
         line_str!(),
-        &format!("starting log server with profile: {}", ac.profile),
+        &format!("starting log server (version {}) with profile: {}", VERSION, ac.profile),
     );
 
     let default_grpc_host = ac.cli_args.grpc_host.as_deref().unwrap_or(default_host);
