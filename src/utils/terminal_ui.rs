@@ -48,20 +48,34 @@ pub fn print_internal_log(
 ) {
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
 
-    // 1. Direct console output with functional coloring (only if writer not yet active)
-    if INTERNAL_SENDER.get().is_none() {
+    // 1. Direct console output with functional coloring (before writer is active, or for errors/warnings)
+    if INTERNAL_SENDER.get().is_none() || level == "ERROR" || level == "CRITICAL" || level == "WARNING" {
         let level_colored = colorize_level(level);
-        println!(
-            "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {} [metadata: mod=log-server]",
-            timestamp,
-            truncate(get_hostname(), 12),
-            truncate(logger_name, 22),
-            level_colored,
-            truncate(filename, 20),
-            truncate(function_name, 25),
-            truncate(line, 6),
-            message
-        );
+        if level == "ERROR" || level == "CRITICAL" {
+            eprintln!(
+                "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {} [metadata: mod=log-server]",
+                timestamp,
+                truncate(get_hostname(), 12),
+                truncate(logger_name, 22),
+                level_colored,
+                truncate(filename, 20),
+                truncate(function_name, 25),
+                truncate(line, 6),
+                message
+            );
+        } else {
+            println!(
+                "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {} [metadata: mod=log-server]",
+                timestamp,
+                truncate(get_hostname(), 12),
+                truncate(logger_name, 22),
+                level_colored,
+                truncate(filename, 20),
+                truncate(function_name, 25),
+                truncate(line, 6),
+                message
+            );
+        }
     }
 
     // 2. Map to internal LogEntry and queue for file write

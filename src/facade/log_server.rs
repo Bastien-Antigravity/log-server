@@ -93,6 +93,9 @@ impl LogServer {
                     line_str!(),
                     &format!("TCP server error: {e}"),
                 );
+                Err(e.to_string())
+            } else {
+                Ok(())
             }
         });
 
@@ -113,6 +116,9 @@ impl LogServer {
                         line_str!(),
                         &format!("Log Bridge error: {e}"),
                     );
+                    Err(e.to_string())
+                } else {
+                    Ok(())
                 }
             }))
         } else {
@@ -128,13 +134,28 @@ impl LogServer {
             &format!("all server components started !"),
         );
 
-        // Wait for servers to complete
-        let _ = tcp_handle.await;
-
-        if let Some(grpc_handle) = grpc_handle {
-            let _ = grpc_handle.await;
+        // Wait for servers to complete; abort if either fails
+        tokio::select! {
+            res = tcp_handle => {
+                match res {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => Err(e.into()),
+                    Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
+                }
+            }
+            res = async {
+                if let Some(h) = grpc_handle {
+                    h.await
+                } else {
+                    std::future::pending().await
+                }
+            } => {
+                match res {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => Err(e.into()),
+                    Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
+                }
+            }
         }
-
-        Ok(())
     }
 }
