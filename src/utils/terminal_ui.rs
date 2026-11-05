@@ -1,4 +1,4 @@
-use chrono::Local;
+use chrono::Utc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
@@ -46,7 +46,7 @@ pub fn print_internal_log(
     line: &str,
     message: &str,
 ) {
-    let timestamp = Local::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
+    let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
 
     // 1. Direct console output with functional coloring (only if writer not yet active)
     if INTERNAL_SENDER.get().is_none() {

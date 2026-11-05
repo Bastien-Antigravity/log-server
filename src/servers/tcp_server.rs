@@ -157,7 +157,7 @@ impl TcpServer {
         // Spawn background heartbeat task (every 10 seconds)
         let heartbeat_client_name = actual_client_name.clone();
         let heartbeat_server_name = server_name.to_string();
-        tokio::spawn(async move {
+        let heartbeat_handle = tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 if let Err(e) = writer.send_heartbeat().await {
@@ -237,6 +237,9 @@ impl TcpServer {
                 break;
             }
         }
+
+        // Abort background heartbeat task once read loop exits to prevent task & socket leak
+        heartbeat_handle.abort();
 
         Ok(())
     }

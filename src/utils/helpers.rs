@@ -108,10 +108,14 @@ pub fn parse_sequence_number(message: &str) -> Option<(u64, &str)> {
 
 //-----------------------------------------------------------------------------------------------
 
-/// Helper to truncate long strings
+/// Helper to truncate long strings safely respecting UTF-8 character boundaries
 pub fn truncate(s: &str, max_len: usize) -> &str {
     if s.len() > max_len {
-        &s[..max_len]
+        let mut idx = max_len;
+        while idx > 0 && !s.is_char_boundary(idx) {
+            idx -= 1;
+        }
+        &s[..idx]
     } else {
         s
     }
@@ -129,6 +133,9 @@ mod tests {
         assert_eq!(truncate("hello", 3), "hel");
         assert_eq!(truncate("hello", 10), "hello");
         assert_eq!(truncate("", 5), "");
+        // Multi-byte UTF-8 character boundary test (e.g. '€' is 3 bytes)
+        assert_eq!(truncate("a€b", 2), "a");
+        assert_eq!(truncate("a€b", 4), "a€");
     }
 
     #[test]

@@ -44,14 +44,20 @@ fn main() {
 
     let enable_grpc = true;
 
-    // Parse host and port from listen_addr
-    let addr_parts: Vec<&str> = listen_addr.split(':').collect();
-    let host = addr_parts[0];
-    let port = addr_parts[1].parse::<u16>().unwrap_or(default_port);
+    // Safely parse host and port from listen_addr [LS-5]
+    let (host, port) = match listen_addr.rsplit_once(':') {
+        Some((h, p)) => (
+            if h.is_empty() { default_host } else { h },
+            p.parse::<u16>().unwrap_or(default_port),
+        ),
+        None => (default_host, default_port),
+    };
 
-    // Parse grpc_port from grpc_listen_addr
-    let grpc_parts: Vec<&str> = grpc_listen_addr.split(':').collect();
-    let grpc_port = grpc_parts[1].parse::<u16>().unwrap_or(default_grpc_port);
+    // Safely parse grpc_port from grpc_listen_addr [LS-5]
+    let grpc_port = match grpc_listen_addr.rsplit_once(':') {
+        Some((_, p)) => p.parse::<u16>().unwrap_or(default_grpc_port),
+        None => default_grpc_port,
+    };
 
 
     if enable_grpc {

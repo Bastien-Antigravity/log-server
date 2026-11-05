@@ -126,6 +126,37 @@ impl LogWriter {
                 Some(packet) = rx.recv() => {
                     if packet.sequence >= current_sequence {
                         buffer.insert(packet.sequence, packet.entry);
+                    } else {
+                        // Late-arriving packet: write immediately rather than silently dropping [LS-3]
+                        let level_str = crate::models::log_entry::LEVEL_STRINGS.get(packet.entry.level as usize).unwrap_or(&"UNKNOWN");
+                        let console_msg = format_log_message(
+                            &packet.entry.timestamp, &packet.entry.hostname, &packet.entry.logger_name, level_str,
+                            &packet.entry.module, &packet.entry.filename, &packet.entry.function_name, &packet.entry.line_number,
+                            &packet.entry.message, &packet.entry.path_name, &packet.entry.process_id, &packet.entry.process_name,
+                            &packet.entry.thread_id, &packet.entry.thread_name, &packet.entry.service_name, &packet.entry.stack_trace,
+                            true,
+                        );
+                        let _ = console_tx.try_send(console_msg);
+
+                        let file_msg = format_log_message(
+                            &packet.entry.timestamp, &packet.entry.hostname, &packet.entry.logger_name, level_str,
+                            &packet.entry.module, &packet.entry.filename, &packet.entry.function_name, &packet.entry.line_number,
+                            &packet.entry.message, &packet.entry.path_name, &packet.entry.process_id, &packet.entry.process_name,
+                            &packet.entry.thread_id, &packet.entry.thread_name, &packet.entry.service_name, &packet.entry.stack_trace,
+                            false,
+                        );
+                        let late_batch = vec![file_msg];
+                        Self::write_batch(&mut file, &mut file_size, &late_batch, &config).await?;
+                        if file_size >= config.max_file_bytes {
+                            file.flush().await?;
+                            Self::rotate_files(&base_file_path, config.backup_count).await?;
+                            file = OpenOptions::new()
+                                .create(true)
+                                .append(true)
+                                .open(&base_file_path)
+                                .await?;
+                            file_size = 0;
+                        }
                     }
                 }
 
@@ -254,15 +285,17 @@ impl LogWriter {
         batch: &[String],
         config: &WriterConfig,
     ) -> tokio::io::Result<()> {
+        let mut written_idx = 0;
         for attempt in 0..=config.max_retries {
             let mut success = true;
-            for data in batch {
-                let log_entry = format!("{data}\n");
+            while written_idx < batch.len() {
+                let log_entry = format!("{}\n", batch[written_idx]);
                 if let Err(_) = file.write_all(log_entry.as_bytes()).await {
                     success = false;
                     break;
                 }
                 *file_size += log_entry.len() as u64;
+                written_idx += 1;
             }
 
             if success {
@@ -280,7 +313,18 @@ impl LogWriter {
 
     /// Rotate log files
     async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
-        for i in (1..=backup_count).rev() {
+        if backup_count == 0 {
+            let _ = fs::remove_file(base_path).await;
+            return Ok(());
+        }
+
+        // Delete the oldest backup file if it exists to preserve exact backup_count
+        let oldest = base_path.with_extension(format!("log.{}", backup_count - 1));
+        if fs::metadata(&oldest).await.is_ok() {
+            let _ = fs::remove_file(&oldest).await;
+        }
+
+        for i in (1..backup_count).rev() {
             let old_path = base_path.with_extension(format!("log.{}", i - 1));
             let new_path = base_path.with_extension(format!("log.{i}"));
 
@@ -289,7 +333,9 @@ impl LogWriter {
             }
         }
 
-        fs::rename(&base_path, &base_path.with_extension("log.0")).await?;
+        if fs::metadata(base_path).await.is_ok() {
+            fs::rename(&base_path, &base_path.with_extension("log.0")).await?;
+        }
         Ok(())
     }
 }
