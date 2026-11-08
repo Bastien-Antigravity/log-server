@@ -37,53 +37,51 @@ pub struct SafeSocket {
 //-----------------------------------------------------------------------------------------------
 
 impl SafeSocketReader {
-    /// Receive framed data from socket. Automatically skips 0-length heartbeat frames.
+    /// Receive framed data from socket. Returns empty BytesMut on 0-length heartbeat frames.
     pub async fn receive_data(&mut self) -> io::Result<Option<BytesMut>> {
-        loop {
-            // big-endian u32 length prefix
-            let mut length_buf = [0u8; 4];
-            let n = self.reader.read_exact(&mut length_buf).await;
+        // big-endian u32 length prefix
+        let mut length_buf = [0u8; 4];
+        let n = self.reader.read_exact(&mut length_buf).await;
 
-            if let Err(e) = n {
-                if e.kind() == io::ErrorKind::UnexpectedEof {
-                    return Ok(None);
-                }
-                return Err(e);
+        if let Err(e) = n {
+            if e.kind() == io::ErrorKind::UnexpectedEof {
+                return Ok(None);
             }
-
-            let slen = u32::from_be_bytes(length_buf) as usize;
-
-            // SECURITY: Prevent OOM by enforcing a maximum message size
-            if slen > MAX_MESSAGE_SIZE {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!(
-                        "message too large: {} bytes (max: {})",
-                        slen, MAX_MESSAGE_SIZE
-                    ),
-                ));
-            }
-
-            // HEARTBEAT: If length is 0, return an empty BytesMut to let the caller handle it (e.g. reset timeouts)
-            if slen == 0 {
-                return Ok(Some(BytesMut::new()));
-            }
-
-            let mut chunk = BytesMut::with_capacity(slen);
-            let mut buf = [0u8; 8192]; // Reusable stack buffer for chunks
-
-            // Read exactly slen bytes
-            while chunk.len() < slen {
-                let remaining = slen - chunk.len();
-                let to_read = std::cmp::min(remaining, buf.len());
-                let n = self.reader.read(&mut buf[..to_read]).await?;
-                if n == 0 {
-                    return Ok(None);
-                }
-                chunk.put_slice(&buf[..n]);
-            }
-            return Ok(Some(chunk));
+            return Err(e);
         }
+
+        let slen = u32::from_be_bytes(length_buf) as usize;
+
+        // SECURITY: Prevent OOM by enforcing a maximum message size
+        if slen > MAX_MESSAGE_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "message too large: {} bytes (max: {})",
+                    slen, MAX_MESSAGE_SIZE
+                ),
+            ));
+        }
+
+        // HEARTBEAT: If length is 0, return an empty BytesMut to let the caller handle it (e.g. reset timeouts)
+        if slen == 0 {
+            return Ok(Some(BytesMut::new()));
+        }
+
+        let mut chunk = BytesMut::with_capacity(slen);
+        let mut buf = [0u8; 8192]; // Reusable stack buffer for chunks
+
+        // Read exactly slen bytes
+        while chunk.len() < slen {
+            let remaining = slen - chunk.len();
+            let to_read = std::cmp::min(remaining, buf.len());
+            let n = self.reader.read(&mut buf[..to_read]).await?;
+            if n == 0 {
+                return Ok(None);
+            }
+            chunk.put_slice(&buf[..n]);
+        }
+        Ok(Some(chunk))
     }
 }
 
