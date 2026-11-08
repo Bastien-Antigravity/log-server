@@ -60,6 +60,10 @@ cargo test --test integration_tests
     *   `test_format_log_message_with_metadata`: Asserts metadata serialization structures (key=value pairs).
     *   `test_truncation`: Verifies automatic log-message clipping if size thresholds are breached.
 *   `core::reorder_test::tests::test_gap_timeout_recovery`: Emulates a 500ms network gap. Asserts that the gap timer expires, triggers recovery, and successfully flushes out-of-order logs.
+*   `core::ring_buffer::tests`:
+    *   `test_ring_buffer_capacity_and_fifo`: Asserts bounded memory usage, monotonic total ingestion counter, and correct FIFO eviction.
+    *   `test_ring_buffer_filters`: Tests filtering by service name and minimum numerical log level.
+    *   `test_ring_buffer_broadcast`: Verifies instant real-time packet delivery to active Tokio broadcast channel subscribers.
 *   `transport::safe_socket::tests::test_heartbeat_skip`: Validates that heartbeat requests are safely ignored when standard payloads are active.
 
 ### Integration Tests

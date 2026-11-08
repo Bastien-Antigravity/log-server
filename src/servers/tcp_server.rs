@@ -1,4 +1,15 @@
-//! TCP socket server for Cap'n Proto messages
+//! ESSENTIAL PROCESS:
+//! High-throughput TCP server handling SafeSocket-framed Cap'n Proto log streams
+//! from universal-logger instances across the microservice ecosystem.
+//!
+//! DATA FLOW:
+//! 1. TCP Stream -> SafeSocket framing -> Cap'n Proto deserialization
+//! 2. LogEntry + Sequence Counter -> LogPacket -> writer_tx
+//!
+//! KEY PARAMETERS:
+//! - host / port: Socket bind address (default 0.0.0.0:9020).
+//! - writer_tx: Channel to async file writer task.
+//! - sequence_counter: Atomic sequence tracking for global ordering.
 
 use crate::models::log_packet::LogPacket;
 use std::sync::atomic::AtomicU64;

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package logservice;
 
+option go_package = "github.com/Bastien-Antigravity/web-interface/src/logclient";
+
 // Level enum - note: protobuf enums start at 0
 enum Level {
   NOTSET = 0;
@@ -19,41 +21,52 @@ enum Level {
 }
 
 service LogBridge {
+    // Ingest single log message
     rpc LogMessage(LogRequest) returns (LogResponse);
+
+    // Query recent buffered logs
+    rpc GetTailLogs(TailLogsRequest) returns (TailLogsResponse);
+
+    // Stream incoming log packets in real time over HTTP/2
+    rpc StreamLogs(StreamLogsRequest) returns (stream LogRequest);
 }
 
 message LogRequest {
-  // recorded by log-server
   string timestamp = 1;
   string hostname = 2;
   string logger_name = 3;
   string module = 4;
-  Level level = 5;  // Changed from string to enum
+  Level level = 5;
   string filename = 6;
   string function_name = 7;
   string line_number = 8;
   string message = 9;
-
-  // others
-  
-  // path of the file
   string path_name = 10;
-  
-  // Process information
   string process_id = 11;
   string process_name = 12;
-  
-  // Thread information  
   string thread_id = 13;
   string thread_name = 14;
-  
-  // Additional requested fields
   string service_name = 15;
-
-  // Optional stack trace for errors
   string stack_trace = 16;
 }
 
 message LogResponse {
     bool success = 1;
+}
+
+message TailLogsRequest {
+    uint32 limit = 1;
+    string service_name = 2;
+    string min_level = 3;
+}
+
+message TailLogsResponse {
+    repeated LogRequest logs = 1;
+    uint32 count = 2;
+    uint64 total_ingested = 3;
+}
+
+message StreamLogsRequest {
+    string service_name = 1;
+    string min_level = 2;
 }

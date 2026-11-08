@@ -16,6 +16,7 @@ tags:
 - [x] **Protocol Hardening**: Enforce 4-byte BE framing and Mandatory Handshake (FEAT-006).
 - [x] **Semantic Refactor**: Rename gRPC ingestion to "Log Bridge" to distinguish from Control Ports.
 - [x] **Rotation Safety**: Verify rotation doesn't drop messages during file switch (FEAT-004) - *Verified: single-threaded async writer task with backpressure is safe.*
+- [x] **Real-Time Log Streaming & Ring Buffer (FEAT-007)**: In-memory circular buffer (LogRingBuffer, 5,000 slots) and gRPC server-side streaming (StreamLogs / GetTailLogs) consumed directly by web-interface for live console observability.
 
 ## 🏗️ Technical Debt
 - [x] Refactor GRPC/TCP error messages for clarity - *Verified: structured logging provides full context and status.*

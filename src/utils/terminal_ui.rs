@@ -1,3 +1,15 @@
+//! ESSENTIAL PROCESS:
+//! Terminal UI formatting, ANSI color palettes, and internal log-server self-logging.
+//!
+//! DATA FLOW:
+//! 1. Internal logging calls -> print_internal_log()
+//! 2. Colored formatting output to stdout
+//! 3. Asynchronous queue dispatch to writer task for disk persistence
+//!
+//! KEY PARAMETERS:
+//! - INTERNAL_SENDER: OnceLock channel to writer task for self-logging.
+//! - INTERNAL_COUNTER: OnceLock atomic sequence counter.
+
 use chrono::Utc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};

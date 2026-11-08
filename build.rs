@@ -1,16 +1,14 @@
-// =============================================================================
-// ESSENTIAL PROCESS:
-// Build script for log-server. Compiles protobuf schemas via tonic-build for
-// gRPC services and resolves dynamic semver from VERSION.txt.
-//
-// DATA FLOW:
-// Reads src/schema/proto/log_service.proto -> generates Rust gRPC bindings.
-// Reads VERSION.txt -> exposes APP_VERSION environment variable to compiler.
-//
-// KEY PARAMETERS:
-// - src/schema/proto/log_service.proto: Input proto schema for log bridge.
-// - APP_VERSION: Injected cargo rustc environment variable.
-// =============================================================================
+//! ESSENTIAL PROCESS:
+//! Build script for log-server. Compiles protobuf schemas via tonic-build for
+//! gRPC services and resolves dynamic semver from VERSION.txt.
+//!
+//! DATA FLOW:
+//! 1. Reads src/schema/proto/log_service.proto -> generates Rust gRPC bindings.
+//! 2. Reads VERSION.txt -> exposes APP_VERSION environment variable to compiler.
+//!
+//! KEY PARAMETERS:
+//! - src/schema/proto/log_service.proto: Input proto schema for log bridge.
+//! - APP_VERSION: Injected cargo rustc environment variable.
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Compile gRPC protobuf schemas

@@ -1,6 +1,15 @@
-//! Log message formatting logic
+//! ESSENTIAL PROCESS:
+//! High-performance log message formatting with fixed-width column alignment,
+//! optional ANSI coloring, and structured metadata tail.
 //!
-//! Implements the hybrid Logfmt style with fixed columns and extra metadata.
+//! DATA FLOW:
+//! 1. LogEntry fields -> format_log_message()
+//! 2. Column formatting and optional ANSI color injection
+//! 3. Formatted string output (console or disk persistence)
+//!
+//! KEY PARAMETERS:
+//! - use_color: True for stdout ANSI coloration, false for disk persistence.
+//! - Fixed-width column padding for timestamp, host, logger, level, file, func, line.
 
 use crate::utils::helpers::truncate;
 

@@ -1,9 +1,18 @@
-//! Core data models for the log server
+//! ESSENTIAL PROCESS:
+//! Core data models representing unified log records across TCP and gRPC protocols.
 //!
-//! Centralized definitions to prevent circular dependencies between modules.
+//! DATA FLOW:
+//! 1. Ingested Protocol Structs -> LogEntry
+//! 2. LogEntry -> Ring Buffer / Formatter / File Writer
+//!
+//! KEY PARAMETERS:
+//! - LogEntry: Flattened struct with timestamp, host, logger, level, message, and metadata.
+//! - LEVEL_STRINGS: Standard mapping array from numeric level to name string.
+
+use serde::{Deserialize, Serialize};
 
 /// Internal log request wrapper for internal use
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LogEntry {
     pub timestamp: String,
     pub hostname: String,

@@ -1,7 +1,15 @@
-//! Log Server Main Binary
+//! ESSENTIAL PROCESS:
+//! Log Server main executable entry point. Bootstraps the distributed runtime,
+//! resolves network addresses via microservice-toolbox, and initializes TCP
+//! and gRPC logging daemons.
 //!
-//! Centralized logging server that handles both TCP socket (Cap'n Proto)
-//! and gRPC log messages with ordered file writing and rotation.
+//! DATA FLOW:
+//! 1. CLI / Config slice -> load_config("standalone")
+//! 2. LogServer::new() -> LogServer::run()
+//!
+//! KEY PARAMETERS:
+//! - standalone.yaml / local config: Listen host, TCP port (9020), gRPC port (9021).
+//! - APP_VERSION: Injected compilation semver from build.rs.
 
 use log_server::facade::log_server::LogServer;
 use log_server::line_str;
@@ -58,7 +66,6 @@ fn main() {
         Some((_, p)) => p.parse::<u16>().unwrap_or(default_grpc_port),
         None => default_grpc_port,
     };
-
 
     if enable_grpc {
         print_internal_log(

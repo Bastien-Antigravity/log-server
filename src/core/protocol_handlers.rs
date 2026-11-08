@@ -1,3 +1,17 @@
+//! ESSENTIAL PROCESS:
+//! Binary protocol decoding and message validation handlers. Unpacks Cap'n Proto
+//! messages from SafeSocket frames and translates gRPC payloads into LogPacket instances.
+//!
+//! DATA FLOW:
+//! 1. SafeSocket bytes -> Cap'n Proto Reader -> LogEntry
+//! 2. gRPC ProtoLogRequest -> LogEntry
+//! 3. LogEntry + Sequence Counter -> LogPacket -> writer_tx
+//!
+//! KEY PARAMETERS:
+//! - identify_client_from_handshake: Extracts sender identity from initial connection.
+//! - handle_tcp_message: Unpacks packed Cap'n Proto bytes into LogPacket.
+//! - handle_grpc_message: Wraps gRPC LogEntry with sequence number into LogPacket.
+
 use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use capnp::{message::ReaderOptions, serialize, serialize_packed};

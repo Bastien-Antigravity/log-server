@@ -1,4 +1,14 @@
-//! Safe TCP socket wrapper with message framing and heartbeat support
+//! ESSENTIAL PROCESS:
+//! Safe TCP socket wrapper with 4-byte big-endian length prefix framing,
+//! zero-length heartbeat packet filtering, and split read/write halves.
+//!
+//! DATA FLOW:
+//! 1. TcpStream -> SafeSocket::new() -> (SafeSocketReader, SafeSocketWriter)
+//! 2. SafeSocketReader::receive() -> Discards heartbeats -> Returns payload bytes
+//!
+//! KEY PARAMETERS:
+//! - MAX_MESSAGE_SIZE: 10MB guard against unbounded allocation attacks.
+//! - 4-byte big-endian integer length framing header.
 
 use bytes::{BufMut, BytesMut};
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};

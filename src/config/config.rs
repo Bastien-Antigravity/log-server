@@ -1,4 +1,15 @@
-//! Server configuration
+//! ESSENTIAL PROCESS:
+//! Log server configuration structure holding host, TCP socket port, and gRPC port.
+//!
+//! DATA FLOW:
+//! 1. CLI / Environment / standalone.yaml -> Config::new()
+//! 2. Config injected into TCP and gRPC Server components
+//!
+//! KEY PARAMETERS:
+//! - name: Service name (default "log_server").
+//! - host: Network bind address (default 0.0.0.0).
+//! - port: TCP socket port (default 9020).
+//! - grpc_port: gRPC bridge port (default 9021).
 
 /// Server configuration
 #[derive(Clone)]

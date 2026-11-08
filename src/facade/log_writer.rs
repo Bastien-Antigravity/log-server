@@ -1,6 +1,18 @@
-//! File writer with ordering and rotation
+//! ESSENTIAL PROCESS:
+//! Asynchronous ordered file writer and rotation coordinator. Buffers incoming
+//! packets into a sequence BTreeMap, flushes batches to _main.log, handles size-based
+//! rotation, and feeds the in-memory circular ring buffer.
 //!
-//! Handles ordered writing of log messages to files with rotation.
+//! DATA FLOW:
+//! 1. LogPacket stream from MPSC channel
+//! 2. BTreeMap reordering buffer sorted by atomic sequence
+//! 3. LogRingBuffer insertion and async disk batch write
+//! 4. Background console task queuing (non-blocking)
+//!
+//! KEY PARAMETERS:
+//! - max_file_bytes: 10MB per log chunk before rotation.
+//! - backup_count: Number of historical rotated log files preserved (default 10).
+//! - gap_timeout_ms: Timeout threshold to advance sequence on missing packets (500ms).
 
 use crate::core::log_formatter::format_log_message;
 use crate::models::log_packet::LogPacket;
@@ -77,14 +89,17 @@ impl LogWriter {
 
     //-----------------------------------------------------------------------------------------------
 
-    /// Start the writer task
-    pub fn start_writer_task(&self) -> mpsc::Sender<LogPacket> {
+    /// Start the writer task with in-memory ring buffer support
+    pub fn start_writer_task(
+        &self,
+        ring_buffer: std::sync::Arc<crate::core::ring_buffer::LogRingBuffer>,
+    ) -> mpsc::Sender<LogPacket> {
         let (writer_tx, writer_rx) = mpsc::channel::<LogPacket>(self.config.buffer_size);
         let base_path = self.base_file_path.clone();
         let config = self.config.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = Self::writer_task(writer_rx, base_path, config).await {
+            if let Err(e) = Self::writer_task(writer_rx, base_path, config, ring_buffer).await {
                 eprintln!("Writer task failed: {e}");
             }
         });
@@ -99,6 +114,7 @@ impl LogWriter {
         mut rx: mpsc::Receiver<LogPacket>,
         base_file_path: PathBuf,
         config: WriterConfig,
+        ring_buffer: std::sync::Arc<crate::core::ring_buffer::LogRingBuffer>,
     ) -> tokio::io::Result<()> {
         let mut file = OpenOptions::new()
             .create(true)
@@ -124,6 +140,7 @@ impl LogWriter {
             tokio::select! {
                 // Branch 1: Incoming structured packets
                 Some(packet) = rx.recv() => {
+                    ring_buffer.push(packet.entry.clone());
                     if packet.sequence >= current_sequence {
                         buffer.insert(packet.sequence, packet.entry);
                     } else {

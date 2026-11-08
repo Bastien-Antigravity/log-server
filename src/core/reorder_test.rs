@@ -1,3 +1,13 @@
+//! ESSENTIAL PROCESS:
+//! Regression tests for sequence reordering, gap detection, and timeout recovery.
+//!
+//! DATA FLOW:
+//! 1. Out-of-order LogPackets -> Writer task BTreeMap
+//! 2. Gap timeout force-flush triggers on missing sequence
+//!
+//! KEY PARAMETERS:
+//! - gap_timeout_ms: Shortened interval (100ms) for deterministic test execution.
+
 #[cfg(test)]
 mod tests {
     use crate::facade::log_writer::{LogWriter, WriterConfig};
@@ -18,7 +28,8 @@ mod tests {
         // Override config for the test (we need to expose config or use a custom constructor)
         // For now, we'll assume the default 500ms if we can't inject, but let's try to make it testable.
 
-        let tx = writer.start_writer_task();
+        let ring_buffer = std::sync::Arc::new(crate::core::ring_buffer::LogRingBuffer::new(100));
+        let tx = writer.start_writer_task(ring_buffer);
 
         // 2. Send sequence 1 (Skipping 0)
         let entry = LogEntry {

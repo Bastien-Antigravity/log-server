@@ -1,3 +1,16 @@
+//! ESSENTIAL PROCESS:
+//! Integration test suite verifying end-to-end ingestion across TCP and gRPC protocols.
+//!
+//! DATA FLOW:
+//! 1. Starts test LogServer on ephemeral ports
+//! 2. Sends framed TCP Cap'n Proto message with handshake
+//! 3. Sends structured gRPC message via LogBridgeClient
+//! 4. Validates sequential persistence in _main.log
+//!
+//! KEY PARAMETERS:
+//! - tcp_port: 12920 test port.
+//! - grpc_port: 12921 test port.
+
 use capnp::serialize_packed;
 use std::fs;
 use tokio::io::AsyncWriteExt;
