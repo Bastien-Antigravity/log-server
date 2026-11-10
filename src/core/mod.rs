@@ -7,6 +7,7 @@
 //! KEY PARAMETERS:
 //! - log_formatter, protocol_handlers, reorder_test, ring_buffer.
 
+pub mod contracts;
 pub mod log_formatter;
 pub mod protocol_handlers;
 pub mod reorder_test;

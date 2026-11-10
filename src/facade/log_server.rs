@@ -153,6 +153,9 @@ impl LogServer {
             &format!("all server components started !"),
         );
 
+        // Publish exhaustive OpenMFE spec + contracts asynchronously to web-interface
+        crate::core::contracts::spawn_web_interface_registration(self.config.clone(), 5000);
+
         // Wait for servers to complete; abort if either fails
         tokio::select! {
             res = tcp_handle => {

@@ -4,8 +4,8 @@
 `log-server` is a high-performance, asynchronous Rust logging daemon for the Bastien-Antigravity fleet. It accepts length-prefixed framed TCP log streams from microservices over `safe-socket`, processes and formats messages, writes to rotating log files, and broadcasts active log streams to monitoring clients.
 
 - **Language**: Rust (Tokio async runtime)
-- **Exposed Capability**: `log_server` (Port: `9020` SafeSocket TCP)
-- **Framing**: 4-byte length prefix + payload, 30s heartbeat ping/pong (`safe-socket` standard)
+- **Exposed Capability**: `log_server` (Port: `9020` SafeSocket TCP, Port: `9021` Tonic gRPC `LogBridge`)
+- **Framing & Contracts**: 4-byte length prefix + Cap'n Proto payload (`logger.capnp`), gRPC `LogBridge` (`log_service.proto` including `GetExchangeContracts`), and async OpenMFE registry heartbeat to `web-interface` (`src/core/contracts.rs`, `src/facade/log_server.rs`)
 - **Configuration Link**: `standalone.yaml -> ../docker-deployment/modes/local/config/native.yaml`
 
 ## Key Build & Test Commands

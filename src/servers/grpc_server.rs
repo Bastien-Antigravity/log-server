@@ -20,6 +20,7 @@ use tokio_stream::StreamExt;
 use tonic::{transport::Server, Request, Response, Status};
 
 use crate::config::config::Config;
+use crate::core::contracts::build_exchange_contracts_json;
 use crate::core::protocol_handlers::handle_grpc_message;
 use crate::core::ring_buffer::LogRingBuffer;
 use crate::line_str;
@@ -34,6 +35,8 @@ pub mod log_service {
 
 use log_service::{
     log_bridge_server::{LogBridge, LogBridgeServer},
+    ContractsRequest,
+    ContractsResponse,
     LogRequest as ProtoLogRequest,
     LogResponse,
     StreamLogsRequest,
@@ -101,6 +104,7 @@ impl LogBridgeGateway {
 /// gRPC bridge service implementation
 pub struct LogBridgeServiceImpl {
     server_name: String,
+    config: Config,
     writer_tx: mpsc::Sender<LogPacket>,
     sequence_counter: Arc<AtomicU64>,
     ring_buffer: Arc<LogRingBuffer>,
@@ -118,6 +122,7 @@ impl LogBridgeServiceImpl {
     ) -> Self {
         Self {
             server_name: config.name.clone(),
+            config: config.clone(),
             writer_tx,
             sequence_counter,
             ring_buffer,
@@ -233,6 +238,26 @@ impl LogBridge for LogBridgeServiceImpl {
         Ok(Response::new(
             Box::pin(output_stream) as Self::StreamLogsStream
         ))
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Return exhaustive exchange contracts embedded directly in log-server
+    async fn get_exchange_contracts(
+        &self,
+        _request: Request<ContractsRequest>,
+    ) -> Result<Response<ContractsResponse>, Status> {
+        let version = option_env!("APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+        let contracts_json = build_exchange_contracts_json(&self.config, 5000);
+        Ok(Response::new(ContractsResponse {
+            service: "log_server".to_string(),
+            version: version.to_string(),
+            reliable: true,
+            exhaustive: true,
+            source: "log-server live gRPC LogBridge.GetExchangeContracts (embedded .proto / .capnp / SafeSocket)"
+                .to_string(),
+            contracts_json,
+        }))
     }
 }
 
