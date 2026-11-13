@@ -72,7 +72,7 @@ impl LogWriter {
 
     /// Create new log writer with custom config
     pub async fn with_config(config: WriterConfig) -> Result<Self, std::io::Error> {
-        let log_dir = crate::utils::helpers::get_exec_parent_dir().join("logs");
+        let log_dir = crate::utils::helpers::resolve_log_dir();
 
         // Ensure log directory exists
         if let Some(log_dir_str) = log_dir.to_str() {

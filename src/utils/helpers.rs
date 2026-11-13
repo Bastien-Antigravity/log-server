@@ -77,6 +77,30 @@ pub fn get_exec_parent_dir() -> PathBuf {
 
 //-----------------------------------------------------------------------------------------------
 
+/// Report whether process is running inside a Docker container (explicit DOCKER_ENV=true).
+pub fn is_docker_env() -> bool {
+    std::env::var("DOCKER_ENV").as_deref() == Ok("true")
+}
+
+//-----------------------------------------------------------------------------------------------
+
+/// Resolve target log directory: LOG_DIR env var -> /var/log/log-server (Docker) -> <exec_parent>/logs.
+pub fn resolve_log_dir() -> PathBuf {
+    resolve_log_dir_with(std::env::var("LOG_DIR").ok().as_deref(), is_docker_env())
+}
+
+//-----------------------------------------------------------------------------------------------
+
+fn resolve_log_dir_with(env_dir: Option<&str>, is_docker: bool) -> PathBuf {
+    match env_dir {
+        Some(val) if !val.is_empty() => PathBuf::from(val),
+        _ if is_docker => PathBuf::from("/var/log/log-server"),
+        _ => get_exec_parent_dir().join("logs"),
+    }
+}
+
+//-----------------------------------------------------------------------------------------------
+
 /// Get current UTC timestamp as string
 pub fn get_utc_timestamp() -> String {
     chrono::Utc::now()
@@ -163,5 +187,23 @@ mod tests {
         // Should be RFC3339 format
         assert!(ts.contains('T'));
         assert!(ts.contains('Z') || ts.contains('+'));
+    }
+
+    #[test]
+    fn test_resolve_log_dir_with() {
+        let override_dir = resolve_log_dir_with(Some("/var/log/fleet/log-server"), false);
+        assert_eq!(override_dir, PathBuf::from("/var/log/fleet/log-server"));
+
+        let docker_override = resolve_log_dir_with(Some("/custom/logs"), true);
+        assert_eq!(docker_override, PathBuf::from("/custom/logs"));
+
+        let docker_default = resolve_log_dir_with(None, true);
+        assert_eq!(docker_default, PathBuf::from("/var/log/log-server"));
+
+        let native_from_none = resolve_log_dir_with(None, false);
+        assert!(native_from_none.ends_with("logs"));
+
+        let native_from_empty = resolve_log_dir_with(Some(""), false);
+        assert!(native_from_empty.ends_with("logs"));
     }
 }

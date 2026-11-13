@@ -44,8 +44,11 @@ impl LogServer {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let config = Config::new(name, host, port, grpc_port);
 
-        // Create log directory
-        crate::utils::helpers::create_log_folder("logs")?;
+        // Create resolved log directory (LOG_DIR -> DOCKER_ENV=true -> <exec_parent>/logs)
+        let log_dir = crate::utils::helpers::resolve_log_dir();
+        if let Some(log_dir_str) = log_dir.to_str() {
+            crate::utils::helpers::create_log_folder(log_dir_str)?;
+        }
 
         // Initialize writer
         let writer = Arc::new(LogWriter::new().await?);
