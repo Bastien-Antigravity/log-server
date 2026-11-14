@@ -369,7 +369,7 @@ impl LogWriter {
             if buffer.len() > batch_size {
                 batch_size = (batch_size * 2).min(1000);
             } else if buffer.len() < batch_size / 2 {
-                let min_batch = config.initial_batch_size.min(10).max(1);
+                let min_batch = config.initial_batch_size.clamp(1, 10);
                 batch_size = (batch_size / 2).max(min_batch);
             }
         }

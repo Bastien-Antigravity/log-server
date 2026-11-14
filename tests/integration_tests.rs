@@ -25,7 +25,7 @@ pub mod log_service {
 }
 
 use log_service::log_bridge_client::LogBridgeClient;
-use log_service::{LogRequest, TailLogsRequest};
+use log_service::{ContractsRequest, LogRequest, TailLogsRequest};
 
 fn get_available_port() -> Option<u16> {
     match std::net::TcpListener::bind("127.0.0.1:0") {
@@ -235,4 +235,13 @@ async fn send_test_grpc_message(host: &str, port: u16) {
         .await
         .expect("Failed to get tail logs via gRPC");
     assert!(tail_resp.into_inner().total_ingested >= 1);
+
+    // Verify gRPC contract reflection RPC works end-to-end
+    let contracts_resp = client
+        .get_exchange_contracts(tonic::Request::new(ContractsRequest {}))
+        .await
+        .expect("Failed to get exchange contracts via gRPC");
+    let contracts = contracts_resp.into_inner();
+    assert_eq!(contracts.service, "log_server");
+    assert!(contracts.contracts_json.contains("safesocket"));
 }

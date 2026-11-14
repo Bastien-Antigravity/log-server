@@ -153,4 +153,18 @@ mod tests {
         assert!(formatted.contains("very-long-ho"));
         assert!(!formatted.contains(long_host));
     }
+
+    // -----------------------------------------------------------------------------
+
+    #[test]
+    fn test_format_log_message_with_color() {
+        let formatted = format_log_message(
+            "time", "host", "log", "ERROR", "", "", "", "", "critical error occurred", "", "", "", "", "", "", "",
+            true,
+        );
+
+        // Colorized ERROR should contain ANSI escape sequence (\x1b[)
+        assert!(formatted.contains("\x1b["));
+        assert!(formatted.contains("critical error occurred"));
+    }
 }
