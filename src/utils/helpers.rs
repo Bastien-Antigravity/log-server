@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// For line!() formatting
 #[macro_export]
@@ -25,7 +25,7 @@ macro_rules! line_str {
     };
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Get system hostname (cached)
 pub fn get_hostname() -> &'static str {
@@ -45,7 +45,7 @@ pub fn get_hostname() -> &'static str {
     })
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Create log folder if not exists
 pub fn create_log_folder(path: &str) -> std::io::Result<()> {
@@ -56,7 +56,7 @@ pub fn create_log_folder(path: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Get executable parent directory
 pub fn get_exec_parent_dir() -> PathBuf {
@@ -75,21 +75,21 @@ pub fn get_exec_parent_dir() -> PathBuf {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Report whether process is running inside a Docker container (explicit DOCKER_ENV=true).
 pub fn is_docker_env() -> bool {
     std::env::var("DOCKER_ENV").as_deref() == Ok("true")
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Resolve target log directory: LOG_DIR env var -> /var/log/log-server (Docker) -> <exec_parent>/logs.
 pub fn resolve_log_dir() -> PathBuf {
     resolve_log_dir_with(std::env::var("LOG_DIR").ok().as_deref(), is_docker_env())
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 fn resolve_log_dir_with(env_dir: Option<&str>, is_docker: bool) -> PathBuf {
     match env_dir {
@@ -99,7 +99,7 @@ fn resolve_log_dir_with(env_dir: Option<&str>, is_docker: bool) -> PathBuf {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Get current UTC timestamp as string
 pub fn get_utc_timestamp() -> String {
@@ -108,40 +108,7 @@ pub fn get_utc_timestamp() -> String {
         .to_string()
 }
 
-//-----------------------------------------------------------------------------------------------
-
-/// Validate file path is safe and within allowed directories
-pub fn validate_file_path(path: &PathBuf, allowed_base: &PathBuf) -> Result<(), String> {
-    if path.is_absolute() {
-        return Err("Absolute paths are not allowed".to_string());
-    }
-
-    if path.components().count() > 10 {
-        return Err("Path too deep".to_string());
-    }
-
-    // Check if path is within allowed base directory
-    let full_path = allowed_base.join(path);
-    if !full_path.starts_with(allowed_base) {
-        return Err("Path traversal attempt detected".to_string());
-    }
-
-    Ok(())
-}
-
-//-----------------------------------------------------------------------------------------------
-
-/// Parse sequence number from log message
-pub fn parse_sequence_number(message: &str) -> Option<(u64, &str)> {
-    if let Some((seq_str, rest)) = message.split_once(' ') {
-        if let Ok(sequence) = seq_str.parse::<u64>() {
-            return Some((sequence, rest));
-        }
-    }
-    None
-}
-
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Helper to truncate long strings safely respecting UTF-8 character boundaries
 pub fn truncate(s: &str, max_len: usize) -> &str {
@@ -156,7 +123,7 @@ pub fn truncate(s: &str, max_len: usize) -> &str {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// tests
 #[cfg(test)]
@@ -171,14 +138,6 @@ mod tests {
         // Multi-byte UTF-8 character boundary test (e.g. '€' is 3 bytes)
         assert_eq!(truncate("a€b", 2), "a");
         assert_eq!(truncate("a€b", 4), "a€");
-    }
-
-    #[test]
-    fn test_parse_sequence_number() {
-        assert_eq!(parse_sequence_number("123 hello"), Some((123, "hello")));
-        assert_eq!(parse_sequence_number("0 key=val"), Some((0, "key=val")));
-        assert_eq!(parse_sequence_number("abc hello"), None);
-        assert_eq!(parse_sequence_number("123"), None);
     }
 
     #[test]

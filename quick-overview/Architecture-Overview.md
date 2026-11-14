@@ -112,5 +112,5 @@ To ensure absolute chronological logging under heavy network jitter, the `log-se
 ## 🛡️ 3. Safety Controls
 
 *   **Slow-Loris Guard**: The TCP server enforces a strict **5-second timeout** on incoming handshakes. Non-compliant connections are instantly severed to prevent exhaustion.
-*   **Dynamic Backpressure**: If the MPSC buffer hits 1024 messages (e.g., due to disk I/O bottlenecks), network producers yield asynchronously to preserve memory safety.
+*   **Dynamic Backpressure**: If the MPSC buffer hits 2048 messages (e.g., due to disk I/O bottlenecks), network producers yield asynchronously to preserve memory safety.
 *   **Decoupled Failure Domains**: An ingestion crash on a single gRPC or TCP socket never halts the file writing engine or blocks other clients.

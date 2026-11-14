@@ -9,6 +9,7 @@ services:
     restart: unless-stopped
     ports:
       - "${LS_IP:-127.0.0.1}:${LS_PORT:-9020}:${LS_PORT:-9020}"
+      - "${LS_IP:-127.0.0.1}:${LS_GRPC_PORT:-9021}:${LS_GRPC_PORT:-9021}"
     networks:
       - teleremote-network
     labels: [ com.centurylinklabs.watchtower.enable=true ]

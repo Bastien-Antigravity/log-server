@@ -19,11 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-#[allow(clippy::all)]
-#[rustfmt::skip]
-mod capnp_protocol {
-    include!("../protocols/capnp/logger_msg.rs");
-}
+use crate::protocols::capnp::logger_msg as capnp_protocol;
 
 /// Identify client from SafeSocket Hello handshake (Unpacked Cap'n Proto)
 /// 
@@ -62,7 +58,7 @@ pub fn identify_client_from_handshake(data: &[u8]) -> Result<String, String> {
     ))
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Handle incoming TCP client connection
 pub async fn handle_tcp_message(
@@ -169,7 +165,7 @@ pub async fn handle_tcp_message(
     Ok(())
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Handle gRPC log message
 pub async fn handle_grpc_message(
@@ -187,4 +183,36 @@ pub async fn handle_grpc_message(
         .map_err(|e| format!("failed to queue gRPC message: {e}"))?;
 
     Ok(())
+}
+
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_identify_client_from_valid_handshake() {
+        let mut hello_msg = capnp::message::Builder::new_default();
+        {
+            let mut builder = hello_msg.init_root::<capnp_protocol::logger_msg::Builder>();
+            builder.set_timestamp("gateway_service");
+            builder.set_hostname("srv-node-1");
+        }
+
+        let mut buffer = Vec::new();
+        capnp::serialize::write_message(&mut buffer, &hello_msg).unwrap();
+
+        let identity = identify_client_from_handshake(&buffer).expect("valid handshake extraction");
+        assert_eq!(identity, "gateway_service@srv-node-1");
+    }
+
+    // -----------------------------------------------------------------------------
+
+    #[test]
+    fn test_identify_client_from_corrupted_handshake() {
+        let corrupted_data = [0u8, 1, 2, 3, 4, 5];
+        let result = identify_client_from_handshake(&corrupted_data);
+        assert!(result.is_err(), "Corrupted data should fail gracefully without panic");
+    }
 }

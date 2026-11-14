@@ -26,7 +26,7 @@ pub struct LogRingBuffer {
     broadcast_tx: broadcast::Sender<LogEntry>,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl LogRingBuffer {
     /// Create new ring buffer with given capacity and internal broadcast channel
@@ -40,7 +40,7 @@ impl LogRingBuffer {
         }
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Push a new log entry into the circular buffer and broadcast to live subscribers
     pub fn push(&self, entry: LogEntry) {
@@ -57,14 +57,14 @@ impl LogRingBuffer {
         }
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Subscribe to real-time log stream
     pub fn subscribe(&self) -> broadcast::Receiver<LogEntry> {
         self.broadcast_tx.subscribe()
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Retrieve the most recent entries up to `limit`, with optional filters
     pub fn get_tail(
@@ -103,7 +103,7 @@ impl LogRingBuffer {
             .collect()
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Return total number of logs ingested since process start
     pub fn total_ingested(&self) -> u64 {
@@ -111,7 +111,7 @@ impl LogRingBuffer {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

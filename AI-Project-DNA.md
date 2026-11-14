@@ -22,11 +22,11 @@ tags:
 ## 🛠 Technical Constraints
 - **Language**: Rust
 - **Protocols**: Cap'n Proto, gRPC.
-- **Architecture Standard**: Adheres to the ecosystem-wide standards in .
+- **Architecture Standard**: Adheres to the ecosystem-wide standards in `ARCHITECTURE.md` and `AGENTS.md`.
 
 ## 👥 Roles & Responsibilities
 - **Architect**: 
     - Optimize log compression and query speeds.
 - **Developer**:
     - Use the established Rust coding standards.
-    - Reference  for log-viewer UI consistency.
+    - Reference `web-interface` for log-viewer UI consistency.

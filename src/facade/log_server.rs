@@ -31,7 +31,7 @@ pub struct LogServer {
     enable_grpc: bool,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl LogServer {
     /// Create new log server instance
@@ -61,7 +61,7 @@ impl LogServer {
         })
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Run the log server with all components
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
@@ -71,7 +71,7 @@ impl LogServer {
             "log_server.rs",
             "run",
             line_str!(),
-            &format!("starting server components. .  ."),
+            "starting server components. .  .",
         );
 
         // In-memory circular ring buffer for real-time log querying and broadcast streaming
@@ -92,7 +92,7 @@ impl LogServer {
             "log_server.rs",
             "run",
             line_str!(),
-            &format!("internal logger initialized - writer(s) ready !"),
+            "internal logger initialized - writer(s) ready !",
         );
 
         // Start TCP server (always)
@@ -153,7 +153,7 @@ impl LogServer {
             "log_server.rs",
             "run",
             line_str!(),
-            &format!("all server components started !"),
+            "all server components started !",
         );
 
         // Publish exhaustive OpenMFE spec + contracts asynchronously to web-interface

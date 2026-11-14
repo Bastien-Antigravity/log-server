@@ -13,7 +13,7 @@ use crate::config::config::Config;
 pub const LOG_SERVICE_PROTO: &str = include_str!("../schema/proto/log_service.proto");
 pub const LOGGER_CAPNP_SCHEMA: &str = include_str!("../schema/capnp/logger.capnp");
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 fn display_host(host: &str) -> &str {
     if host.is_empty() || host == "0.0.0.0" || host == "::" {

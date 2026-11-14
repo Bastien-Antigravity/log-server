@@ -117,7 +117,7 @@ mod tests {
             false,
         );
 
-        // Check fixed columns (33 + 1 + 12 + 1 + 15 + 1 + 8 + 1 + 20 + 1 + 25 + 1 + 6 + 1 + length of message)
+        // Check fixed columns (33 timestamp + 12 host + 22 logger + 10 level + 20 file + 25 func + 6 line + message)
         assert!(formatted.starts_with(timestamp));
         assert!(formatted.contains("INFO"));
         assert!(formatted.contains("Hello World"));

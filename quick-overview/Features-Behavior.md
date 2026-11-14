@@ -79,6 +79,6 @@ mindmap
 *   **The Problem**: If a network connection drops or packet corruption occurs, a sequence number might be lost forever, causing the `BTreeMap` to stall indefinitely (stuck waiting for the missing ID).
 *   **The Recovery (500ms Gap Timer)**:
     *   If the next expected sequence number is missing but newer logs are in the buffer, a **500ms gap timer** begins ticking.
-    *   If the gap does not resolve within `500ms`, the server skips the missing index, logs a `[SEQUENCE_GAP_WARNING]` indicating a skipped sequence, updates `current_sequence` to the next available ID, and flushes subsequent logs.
+    *   If the gap does not resolve within `500ms`, the server skips the missing index, logs a `[SEQUENCE_GAP]` entry to console and file indicating a skipped sequence, updates `current_sequence` to the next available ID, and flushes subsequent logs.
 *   **Buffer Pressure (Force Progress)**:
-    *   If the in-memory buffer exceeds its maximum capacity limit (`config.buffer_size` - default `1024`), the server triggers **Force Progress**: it immediately jumps execution to the lowest available sequence number in memory, outputs a `[BUFFER_FULL_WARNING]`, and flushes all buffered logs to prevent memory leaks.
+    *   If the in-memory buffer exceeds its maximum capacity limit (`config.buffer_size` - default `2048`), the server triggers **Force Progress**: it immediately jumps execution to the lowest available sequence number in memory, outputs a `[BUFFER_PRESSURE]` entry, and flushes all buffered logs to prevent memory leaks.

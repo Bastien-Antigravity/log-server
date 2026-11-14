@@ -29,7 +29,7 @@ pub struct TcpServer {
     config: Config,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl TcpServer {
     /// Create new TCP server
@@ -44,7 +44,7 @@ impl TcpServer {
         &self.config.name
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Run the TCP server
     pub async fn run(
@@ -73,7 +73,7 @@ impl TcpServer {
             let (socket, addr) = listener.accept().await?;
             let writer_tx = writer_tx.clone();
             let sequence_counter = sequence_counter.clone();
-            let client_address = format!("{addr}", addr = addr);
+            let client_address = addr.to_string();
             let server_name = self.config.name.clone();
 
             tokio::spawn(async move {
@@ -94,7 +94,7 @@ impl TcpServer {
         }
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Handle individual TCP connection
     async fn handle_tcp_connection(
@@ -126,7 +126,18 @@ impl TcpServer {
         // 1. Initial Handshake / Identity Detection (Mandatory - FEAT-006)
         // SECURITY: 5-second timeout to prevent connection-holding (Slow-Loris) attacks.
         let first_bytes = match timeout(Duration::from_secs(5), reader.receive_data()).await {
-            Ok(res) => res?,
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(e)) => {
+                print_internal_log(
+                    "ERROR",
+                    server_name,
+                    "tcp_server.rs",
+                    "handle_tcp_connection",
+                    line_str!(),
+                    &format!("[client: {peer_ip}] handshake read error: {e}"),
+                );
+                return Err(format!("handshake read error from {peer_ip}: {e}").into());
+            }
             Err(_) => {
                 return Err(format!(
                     "handshake timeout from {peer_ip}. Closing connection."
@@ -196,7 +207,18 @@ impl TcpServer {
 
         loop {
             let bytes_read = match timeout(read_timeout, reader.receive_data()).await {
-                Ok(res) => res?,
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(e)) => {
+                    print_internal_log(
+                        "ERROR",
+                        server_name,
+                        "tcp_server.rs",
+                        "handle_tcp_connection",
+                        line_str!(),
+                        &format!("[client: {actual_client_name}] socket read error: {e}"),
+                    );
+                    break;
+                }
                 Err(_) => {
                     print_internal_log(
                         "WARNING",

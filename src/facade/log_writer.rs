@@ -15,8 +15,9 @@
 //! - gap_timeout_ms: Timeout threshold to advance sequence on missing packets (500ms).
 
 use crate::core::log_formatter::format_log_message;
-use crate::models::log_packet::LogPacket;
 use crate::models::log_entry::LogEntry;
+use crate::models::log_packet::LogPacket;
+use crate::utils::helpers::{get_hostname, get_utc_timestamp};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::{
@@ -38,7 +39,7 @@ pub struct WriterConfig {
     pub gap_timeout_ms: u64,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl Default for WriterConfig {
     fn default() -> Self {
@@ -54,7 +55,7 @@ impl Default for WriterConfig {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// File writer with ordering and rotation
 pub struct LogWriter {
@@ -62,13 +63,15 @@ pub struct LogWriter {
     pub(crate) base_file_path: PathBuf,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl LogWriter {
     /// Create new log writer with default config
     pub async fn new() -> Result<Self, std::io::Error> {
         Self::with_config(WriterConfig::default()).await
     }
+
+    // -----------------------------------------------------------------------------
 
     /// Create new log writer with custom config
     pub async fn with_config(config: WriterConfig) -> Result<Self, std::io::Error> {
@@ -87,7 +90,26 @@ impl LogWriter {
         })
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
+
+    /// Create new log writer with custom config and explicit file path
+    pub async fn with_config_and_path(
+        config: WriterConfig,
+        base_file_path: PathBuf,
+    ) -> Result<Self, std::io::Error> {
+        if let Some(parent) = base_file_path.parent() {
+            if let Some(parent_str) = parent.to_str() {
+                crate::utils::helpers::create_log_folder(parent_str)?;
+            }
+        }
+
+        Ok(Self {
+            config,
+            base_file_path,
+        })
+    }
+
+    // -----------------------------------------------------------------------------
 
     /// Start the writer task with in-memory ring buffer support
     pub fn start_writer_task(
@@ -107,7 +129,7 @@ impl LogWriter {
         writer_tx
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Main writer task implementation
     async fn writer_task(
@@ -126,7 +148,8 @@ impl LogWriter {
         let mut buffer: BTreeMap<u64, LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
         let mut batch_size = config.initial_batch_size;
-        let mut gap_timer = tokio::time::interval(Duration::from_millis(config.gap_timeout_ms));
+        let gap_duration = Duration::from_millis(config.gap_timeout_ms);
+        let mut gap_timer = tokio::time::interval_at(tokio::time::Instant::now() + gap_duration, gap_duration);
 
         // ASYNC CONSOLE WORKER: Prevent blocking the writer task with println!
         let (console_tx, mut console_rx) = mpsc::channel::<String>(2048);
@@ -174,6 +197,7 @@ impl LogWriter {
                                 .await?;
                             file_size = 0;
                         }
+                        file.flush().await?;
                     }
                 }
 
@@ -181,6 +205,56 @@ impl LogWriter {
                 _ = gap_timer.tick() => {
                     if let Some(&next_available) = buffer.keys().next() {
                         if next_available > current_sequence {
+                            let gap_text = format!(
+                                "[SEQUENCE_GAP] Missing sequence(s) {}..{} timed out after {}ms; advancing sequence",
+                                current_sequence, next_available, config.gap_timeout_ms
+                            );
+                            let gap_entry = LogEntry {
+                                timestamp: get_utc_timestamp(),
+                                hostname: get_hostname().to_string(),
+                                logger_name: "log_writer".to_string(),
+                                level: 9, // WARNING
+                                module: "log-server".to_string(),
+                                filename: "log_writer.rs".to_string(),
+                                function_name: "writer_task".to_string(),
+                                line_number: "gap".to_string(),
+                                message: gap_text,
+                                service_name: "log_server".to_string(),
+                                ..Default::default()
+                            };
+
+                            // Broadcast to live gRPC StreamLogs and web clients
+                            ring_buffer.push(gap_entry.clone());
+
+                            let console_msg = format_log_message(
+                                &gap_entry.timestamp, &gap_entry.hostname, &gap_entry.logger_name, "WARNING",
+                                &gap_entry.module, &gap_entry.filename, &gap_entry.function_name, &gap_entry.line_number,
+                                &gap_entry.message, &gap_entry.path_name, &gap_entry.process_id, &gap_entry.process_name,
+                                &gap_entry.thread_id, &gap_entry.thread_name, &gap_entry.service_name, &gap_entry.stack_trace,
+                                true,
+                            );
+                            let _ = console_tx.try_send(console_msg);
+
+                            let file_msg = format_log_message(
+                                &gap_entry.timestamp, &gap_entry.hostname, &gap_entry.logger_name, "WARNING",
+                                &gap_entry.module, &gap_entry.filename, &gap_entry.function_name, &gap_entry.line_number,
+                                &gap_entry.message, &gap_entry.path_name, &gap_entry.process_id, &gap_entry.process_name,
+                                &gap_entry.thread_id, &gap_entry.thread_name, &gap_entry.service_name, &gap_entry.stack_trace,
+                                false,
+                            );
+                            let gap_batch = vec![file_msg];
+                            Self::write_batch(&mut file, &mut file_size, &gap_batch, &config).await?;
+                            if file_size >= config.max_file_bytes {
+                                file.flush().await?;
+                                Self::rotate_files(&base_file_path, config.backup_count).await?;
+                                file = OpenOptions::new()
+                                    .create(true)
+                                    .append(true)
+                                    .open(&base_file_path)
+                                    .await?;
+                                file_size = 0;
+                            }
+                            file.flush().await?;
                             current_sequence = next_available;
                         }
                     }
@@ -198,9 +272,44 @@ impl LogWriter {
                 if !buffer.contains_key(&current_sequence) && buffer.len() >= batch_size {
                     let next_available = *buffer.keys().next().unwrap();
                     if next_available > current_sequence {
-                        let warn_msg = format!("[BUFFER_PRESSURE] Forcing progress to {} (dropping gaps)", next_available);
-                        let _ = console_tx.try_send(warn_msg.clone());
-                        batch.push(warn_msg);
+                        let pressure_text = format!(
+                            "[BUFFER_PRESSURE] Reorder queue saturated (>{} packets); forcing progress to {} (dropping gaps)",
+                            batch_size, next_available
+                        );
+                        let pressure_entry = LogEntry {
+                            timestamp: get_utc_timestamp(),
+                            hostname: get_hostname().to_string(),
+                            logger_name: "log_writer".to_string(),
+                            level: 10, // ERROR
+                            module: "log-server".to_string(),
+                            filename: "log_writer.rs".to_string(),
+                            function_name: "writer_task".to_string(),
+                            line_number: "buffer".to_string(),
+                            message: pressure_text,
+                            service_name: "log_server".to_string(),
+                            ..Default::default()
+                        };
+
+                        // Broadcast to live gRPC StreamLogs and web clients
+                        ring_buffer.push(pressure_entry.clone());
+
+                        let console_msg = format_log_message(
+                            &pressure_entry.timestamp, &pressure_entry.hostname, &pressure_entry.logger_name, "ERROR",
+                            &pressure_entry.module, &pressure_entry.filename, &pressure_entry.function_name, &pressure_entry.line_number,
+                            &pressure_entry.message, &pressure_entry.path_name, &pressure_entry.process_id, &pressure_entry.process_name,
+                            &pressure_entry.thread_id, &pressure_entry.thread_name, &pressure_entry.service_name, &pressure_entry.stack_trace,
+                            true,
+                        );
+                        let _ = console_tx.try_send(console_msg);
+
+                        let file_msg = format_log_message(
+                            &pressure_entry.timestamp, &pressure_entry.hostname, &pressure_entry.logger_name, "ERROR",
+                            &pressure_entry.module, &pressure_entry.filename, &pressure_entry.function_name, &pressure_entry.line_number,
+                            &pressure_entry.message, &pressure_entry.path_name, &pressure_entry.process_id, &pressure_entry.process_name,
+                            &pressure_entry.thread_id, &pressure_entry.thread_name, &pressure_entry.service_name, &pressure_entry.stack_trace,
+                            false,
+                        );
+                        batch.push(file_msg);
                         current_sequence = next_available;
                     }
                 }
@@ -256,11 +365,12 @@ impl LogWriter {
                 }
             }
 
-            // Adjust batch size dynamically
+            // Adjust batch size dynamically with configured lower bound
             if buffer.len() > batch_size {
                 batch_size = (batch_size * 2).min(1000);
             } else if buffer.len() < batch_size / 2 {
-                batch_size = (batch_size / 2).max(10);
+                let min_batch = config.initial_batch_size.min(10).max(1);
+                batch_size = (batch_size / 2).max(min_batch);
             }
         }
 
@@ -293,7 +403,7 @@ impl LogWriter {
         Ok(())
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Write batch with retry logic
     async fn write_batch(
@@ -307,7 +417,7 @@ impl LogWriter {
             let mut success = true;
             while written_idx < batch.len() {
                 let log_entry = format!("{}\n", batch[written_idx]);
-                if let Err(_) = file.write_all(log_entry.as_bytes()).await {
+                if file.write_all(log_entry.as_bytes()).await.is_err() {
                     success = false;
                     break;
                 }
@@ -326,7 +436,7 @@ impl LogWriter {
         Ok(())
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Rotate log files
     async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
@@ -354,5 +464,92 @@ impl LogWriter {
             fs::rename(&base_path, &base_path.with_extension("log.0")).await?;
         }
         Ok(())
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_rotate_files_cascading_and_pruning() {
+        let test_dir = std::env::temp_dir().join(format!("log_server_test_rot_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&test_dir).await;
+        let base_path = test_dir.join("_main.log");
+
+        // Cycle 1: First file
+        tokio::fs::write(&base_path, b"entry 0").await.unwrap();
+        LogWriter::rotate_files(&base_path, 3).await.unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.0")).await.unwrap(),
+            "entry 0"
+        );
+
+        // Cycle 2: Second file
+        tokio::fs::write(&base_path, b"entry 1").await.unwrap();
+        LogWriter::rotate_files(&base_path, 3).await.unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.0")).await.unwrap(),
+            "entry 1"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.1")).await.unwrap(),
+            "entry 0"
+        );
+
+        // Cycle 3: Third file (fills backup_count = 3)
+        tokio::fs::write(&base_path, b"entry 2").await.unwrap();
+        LogWriter::rotate_files(&base_path, 3).await.unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.0")).await.unwrap(),
+            "entry 2"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.1")).await.unwrap(),
+            "entry 1"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.2")).await.unwrap(),
+            "entry 0"
+        );
+
+        // Cycle 4: Fourth file (oldest "entry 0" should be pruned)
+        tokio::fs::write(&base_path, b"entry 3").await.unwrap();
+        LogWriter::rotate_files(&base_path, 3).await.unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.0")).await.unwrap(),
+            "entry 3"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.1")).await.unwrap(),
+            "entry 2"
+        );
+        assert_eq!(
+            tokio::fs::read_to_string(base_path.with_extension("log.2")).await.unwrap(),
+            "entry 1"
+        );
+
+        // Cleanup
+        let _ = tokio::fs::remove_dir_all(&test_dir).await;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_rotate_files_zero_backups() {
+        let test_dir = std::env::temp_dir().join(format!("log_server_test_rot0_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&test_dir).await;
+        let base_path = test_dir.join("_main.log");
+
+        tokio::fs::write(&base_path, b"temp data").await.unwrap();
+        assert!(base_path.exists());
+
+        LogWriter::rotate_files(&base_path, 0).await.unwrap();
+        assert!(!base_path.exists());
+        assert!(!base_path.with_extension("log.0").exists());
+
+        let _ = tokio::fs::remove_dir_all(&test_dir).await;
     }
 }

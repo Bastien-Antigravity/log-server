@@ -70,8 +70,10 @@ The Log Bridge (Port 9021) provides a gRPC gateway for structured logging via `L
 
 Writer settings in `src/facade/log_writer.rs`:
 - `max_file_bytes`: 10MB default.
-- `gap_timeout_ms`: 500ms before triggering a synthetic gap entry.
+- `backup_count`: 10 historical log files.
+- `gap_timeout_ms`: 500ms before triggering a synthetic `[SEQUENCE_GAP]` entry.
 - `buffer_size`: 2048 packets.
+- `initial_batch_size`: 100 packets (dynamically scaled).
 
 ## Project Structure
 

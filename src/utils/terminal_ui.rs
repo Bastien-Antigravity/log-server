@@ -60,12 +60,8 @@ pub fn print_internal_log(
 ) {
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
 
-    // 1. Direct console output with functional coloring (before writer is active, or for errors/warnings)
-    if INTERNAL_SENDER.get().is_none()
-        || level == "ERROR"
-        || level == "CRITICAL"
-        || level == "WARNING"
-    {
+    // 1. Direct console output with functional coloring (only before writer is active)
+    if INTERNAL_SENDER.get().is_none() {
         let level_colored = colorize_level(level);
         println!(
             "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {} [metadata: mod=log-server]",
@@ -112,13 +108,14 @@ pub fn print_internal_log(
             ..Default::default()
         };
 
-        tokio::spawn(async move {
-            let _ = sender
-                .send(LogPacket {
-                    sequence: seq,
-                    entry,
-                })
-                .await;
-        });
+        let packet = LogPacket {
+            sequence: seq,
+            entry,
+        };
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(packet)) = sender.try_send(packet) {
+            tokio::spawn(async move {
+                let _ = sender.send(packet).await;
+            });
+        }
     }
 }

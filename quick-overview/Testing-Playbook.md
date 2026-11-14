@@ -69,7 +69,7 @@ cargo test --test integration_tests
 ### Integration Tests
 *   `tests/integration_tests.rs`:
     1.  **Bootstrap**: Spawns the complete `LogServer` structure on a dynamic background loop using test ports (`12920` / `12921`).
-    2.  **Handshake**: Initializes a standard TCP socket client and fires a valid Cap'n Proto packed `HelloMsg` handshake.
+    2.  **Handshake**: Initializes a standard TCP socket client and fires a valid Cap'n Proto unpacked `HelloMsg` handshake.
     3.  **Data Generation**: Streams serialized packed TCP log events, then streams independent gRPC requests via Tonic.
     4.  **Verification**: Shuts down the server, parses `logs/_main.log`, and asserts that both channels are successfully integrated in perfect chronological sequence.
 

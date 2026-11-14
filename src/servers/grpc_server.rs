@@ -49,7 +49,7 @@ pub struct LogBridgeGateway {
     config: Config,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl LogBridgeGateway {
     /// Create new gRPC bridge gateway
@@ -64,7 +64,7 @@ impl LogBridgeGateway {
         &self.config.name
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Run the gRPC server
     pub async fn run(
@@ -99,7 +99,7 @@ impl LogBridgeGateway {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// gRPC bridge service implementation
 pub struct LogBridgeServiceImpl {
@@ -110,7 +110,7 @@ pub struct LogBridgeServiceImpl {
     ring_buffer: Arc<LogRingBuffer>,
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 impl LogBridgeServiceImpl {
     /// Create new gRPC bridge implementation
@@ -130,7 +130,7 @@ impl LogBridgeServiceImpl {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 #[tonic::async_trait]
 impl LogBridge for LogBridgeServiceImpl {
@@ -175,7 +175,7 @@ impl LogBridge for LogBridgeServiceImpl {
         }
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Retrieve recent buffered log entries
     async fn get_tail_logs(
@@ -203,7 +203,7 @@ impl LogBridge for LogBridgeServiceImpl {
         }))
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Stream incoming log entries in real-time over HTTP/2
     async fn stream_logs(
@@ -240,7 +240,7 @@ impl LogBridge for LogBridgeServiceImpl {
         ))
     }
 
-    //-----------------------------------------------------------------------------------------------
+    // -----------------------------------------------------------------------------
 
     /// Return exhaustive exchange contracts embedded directly in log-server
     async fn get_exchange_contracts(
@@ -261,7 +261,7 @@ impl LogBridge for LogBridgeServiceImpl {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 /// Parse string log level or integer into numeric level
 fn parse_level(lvl: &str) -> Option<i32> {
@@ -289,7 +289,7 @@ fn parse_level(lvl: &str) -> Option<i32> {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 // Conversion from protobuf to internal type
 impl From<ProtoLogRequest> for LogEntry {
@@ -315,7 +315,7 @@ impl From<ProtoLogRequest> for LogEntry {
     }
 }
 
-//-----------------------------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 
 // Conversion from internal type to protobuf
 impl From<LogEntry> for ProtoLogRequest {
@@ -338,5 +338,59 @@ impl From<LogEntry> for ProtoLogRequest {
             service_name: entry.service_name,
             stack_trace: entry.stack_trace,
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_level_names_and_numbers() {
+        assert_eq!(parse_level("DEBUG"), Some(1));
+        assert_eq!(parse_level("info"), Some(3));
+        assert_eq!(parse_level("  WARNING  "), Some(9));
+        assert_eq!(parse_level("critical"), Some(11));
+        assert_eq!(parse_level("10"), Some(10));
+        assert_eq!(parse_level("0"), Some(0));
+        assert_eq!(parse_level(""), None);
+        assert_eq!(parse_level("   "), None);
+        assert_eq!(parse_level("UNKNOWN_LVL"), None);
+    }
+
+    // -----------------------------------------------------------------------------
+
+    #[test]
+    fn test_proto_to_internal_log_entry_roundtrip() {
+        let proto = ProtoLogRequest {
+            timestamp: "2026-11-14T12:00:00Z".to_string(),
+            hostname: "host-1".to_string(),
+            logger_name: "test-logger".to_string(),
+            level: 3,
+            module: "test-mod".to_string(),
+            filename: "main.rs".to_string(),
+            function_name: "run".to_string(),
+            line_number: "42".to_string(),
+            message: "roundtrip test message".to_string(),
+            path_name: "/app/main.rs".to_string(),
+            process_id: "1234".to_string(),
+            process_name: "log-server".to_string(),
+            thread_id: "5678".to_string(),
+            thread_name: "tokio-worker-1".to_string(),
+            service_name: "log_server".to_string(),
+            stack_trace: "".to_string(),
+        };
+
+        let internal: LogEntry = proto.clone().into();
+        assert_eq!(internal.message, "roundtrip test message");
+        assert_eq!(internal.level, 3);
+        assert_eq!(internal.hostname, "host-1");
+
+        let back_to_proto: ProtoLogRequest = internal.into();
+        assert_eq!(back_to_proto.message, proto.message);
+        assert_eq!(back_to_proto.timestamp, proto.timestamp);
+        assert_eq!(back_to_proto.line_number, proto.line_number);
     }
 }

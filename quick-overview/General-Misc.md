@@ -80,12 +80,12 @@ docker compose up -d log-server
 
 Here are the primary diagnostic indicators you may see in the terminal or `logs/_main.log`:
 
-### `[SEQUENCE_GAP_WARNING] Skipping from X to Y due to timeout`
-*   **What it means**: Network jitter or an ungraceful client shutdown has lost sequence number `X`.
-*   **Action**: The server is functioning perfectly; the built-in **500ms Gap Timer** has bypassed the gap to prevent backpressure from hanging active clients.
+### `[SEQUENCE_GAP] Skipping missing sequence(s) X..Y after 500ms timeout`
+*   **What it means**: Network jitter or an ungraceful client shutdown has lost sequence numbers.
+*   **Action**: The server is functioning as designed; the built-in **500ms Gap Timer** has audited the gap and bypassed it to prevent backpressure from hanging active clients.
 
-### `[BUFFER_FULL_WARNING] Forcing progress to X due to buffer pressure`
-*   **What it means**: The sorted in-memory queue has reached its safety capacity limit (1024 packets).
+### `[BUFFER_PRESSURE] Forcing progress to X (dropping gaps)`
+*   **What it means**: The sorted in-memory queue has reached its safety capacity limit (2048 packets).
 *   **Action**: The server is clearing memory by flushing current logs immediately. Verify client network stability or increase standard file system write speeds.
 
 ### `TCP Connection established / Handshake timeout`
