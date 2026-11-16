@@ -51,7 +51,7 @@ mod tests {
             .await
             .unwrap();
         let ring_buffer = std::sync::Arc::new(crate::core::ring_buffer::LogRingBuffer::new(100));
-        let tx = writer.start_writer_task(ring_buffer.clone());
+        let (tx, _writer_handle) = writer.start_writer_task(ring_buffer.clone());
 
         // Send sequence 1 (Skipping 0)
         let entry = LogEntry {
@@ -106,7 +106,7 @@ mod tests {
             .await
             .unwrap();
         let ring_buffer = std::sync::Arc::new(crate::core::ring_buffer::LogRingBuffer::new(100));
-        let tx = writer.start_writer_task(ring_buffer.clone());
+        let (tx, _writer_handle) = writer.start_writer_task(ring_buffer.clone());
 
         // Send out-of-order sequence: 3, 0, 2, 1
         let messages = [
@@ -182,7 +182,7 @@ mod tests {
             .await
             .unwrap();
         let ring_buffer = std::sync::Arc::new(crate::core::ring_buffer::LogRingBuffer::new(100));
-        let tx = writer.start_writer_task(ring_buffer.clone());
+        let (tx, _writer_handle) = writer.start_writer_task(ring_buffer.clone());
 
         // Skip sequence 0, send 4 items (1, 2, 3, 4) to hit batch_size (4)
         for seq in 1..=4 {
@@ -244,7 +244,7 @@ mod tests {
             .await
             .unwrap();
         let ring_buffer = std::sync::Arc::new(crate::core::ring_buffer::LogRingBuffer::new(100));
-        let tx = writer.start_writer_task(ring_buffer.clone());
+        let (tx, _writer_handle) = writer.start_writer_task(ring_buffer.clone());
 
         // Step 1: Send seq 1 (skipping 0) and wait for gap timeout to advance sequence to 2
         tx.send(LogPacket {

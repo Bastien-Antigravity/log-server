@@ -78,7 +78,7 @@ impl LogServer {
         let ring_buffer = Arc::new(LogRingBuffer::new(5000));
 
         // Start a single writer task for all components to share
-        let writer_tx = self.writer.start_writer_task(ring_buffer.clone());
+        let (writer_tx, writer_handle) = self.writer.start_writer_task(ring_buffer.clone());
 
         // Centralized sequence counter for global ordering
         let sequence_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -159,7 +159,7 @@ impl LogServer {
         // Publish exhaustive OpenMFE spec + contracts asynchronously to web-interface
         crate::core::contracts::spawn_web_interface_registration(self.config.clone(), 5000);
 
-        // Wait for servers to complete; abort if either fails
+        // Wait for servers or writer task to complete; abort if any fails
         tokio::select! {
             res = tcp_handle => {
                 match res {
@@ -179,6 +179,33 @@ impl LogServer {
                     Ok(Ok(())) => Ok(()),
                     Ok(Err(e)) => Err(e.into()),
                     Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
+                }
+            }
+            res = writer_handle => {
+                match res {
+                    Ok(Ok(())) => Ok(()),
+                    Ok(Err(e)) => {
+                        print_internal_log(
+                            "CRITICAL",
+                            &self.name,
+                            "log_server.rs",
+                            "run",
+                            line_str!(),
+                            &format!("Fatal disk I/O failure in writer task: {e}"),
+                        );
+                        Err(Box::new(e) as Box<dyn std::error::Error>)
+                    }
+                    Err(join_err) => {
+                        print_internal_log(
+                            "CRITICAL",
+                            &self.name,
+                            "log_server.rs",
+                            "run",
+                            line_str!(),
+                            &format!("Writer task panicked or was aborted: {join_err}"),
+                        );
+                        Err(Box::new(join_err) as Box<dyn std::error::Error>)
+                    }
                 }
             }
         }

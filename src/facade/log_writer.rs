@@ -110,22 +110,21 @@ impl LogWriter {
 
     // -----------------------------------------------------------------------------
 
-    /// Start the writer task with in-memory ring buffer support
+    /// Start the writer task with in-memory ring buffer support, returning the sender channel
+    /// and the background task JoinHandle for lifecycle supervision and fail-fast termination.
     pub fn start_writer_task(
         &self,
         ring_buffer: std::sync::Arc<crate::core::ring_buffer::LogRingBuffer>,
-    ) -> mpsc::Sender<LogPacket> {
+    ) -> (mpsc::Sender<LogPacket>, tokio::task::JoinHandle<tokio::io::Result<()>>) {
         let (writer_tx, writer_rx) = mpsc::channel::<LogPacket>(self.config.buffer_size);
         let base_path = self.base_file_path.clone();
         let config = self.config.clone();
 
-        tokio::spawn(async move {
-            if let Err(e) = Self::writer_task(writer_rx, base_path, config, ring_buffer).await {
-                eprintln!("Writer task failed: {e}");
-            }
+        let handle = tokio::spawn(async move {
+            Self::writer_task(writer_rx, base_path, config, ring_buffer).await
         });
 
-        writer_tx
+        (writer_tx, handle)
     }
 
     // -----------------------------------------------------------------------------
@@ -137,12 +136,18 @@ impl LogWriter {
         config: WriterConfig,
         ring_buffer: std::sync::Arc<crate::core::ring_buffer::LogRingBuffer>,
     ) -> tokio::io::Result<()> {
-        let mut sink = TransactionalFileWriter::new(
+        let mut sink = match TransactionalFileWriter::new(
             base_file_path,
             config.max_retries,
             config.retry_delay_ms,
         )
-        .await?;
+        .await {
+            Ok(s) => s,
+            Err(e) => {
+                notify_disk_failure(&ring_buffer, "Failed to initialize transactional writer", &e);
+                return Err(e);
+            }
+        };
 
         let mut buffer: BTreeMap<u64, LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
@@ -185,9 +190,18 @@ impl LogWriter {
                             false,
                         );
                         let late_batch = vec![file_msg];
-                        sink.write_batch(&late_batch).await?;
-                        let _ = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await?;
-                        sink.flush().await?;
+                        if let Err(e) = sink.write_batch(&late_batch).await {
+                            notify_disk_failure(&ring_buffer, "Failed writing late batch to disk", &e);
+                            return Err(e);
+                        }
+                        if let Err(e) = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await {
+                            notify_disk_failure(&ring_buffer, "Failed file rotation after late batch", &e);
+                            return Err(e);
+                        }
+                        if let Err(e) = sink.flush().await {
+                            notify_disk_failure(&ring_buffer, "Failed flushing late batch to disk", &e);
+                            return Err(e);
+                        }
                     }
                 }
 
@@ -233,9 +247,18 @@ impl LogWriter {
                                 false,
                             );
                             let gap_batch = vec![file_msg];
-                            sink.write_batch(&gap_batch).await?;
-                            let _ = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await?;
-                            sink.flush().await?;
+                            if let Err(e) = sink.write_batch(&gap_batch).await {
+                                notify_disk_failure(&ring_buffer, "Failed writing gap batch to disk", &e);
+                                return Err(e);
+                            }
+                            if let Err(e) = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await {
+                                notify_disk_failure(&ring_buffer, "Failed file rotation after gap batch", &e);
+                                return Err(e);
+                            }
+                            if let Err(e) = sink.flush().await {
+                                notify_disk_failure(&ring_buffer, "Failed flushing gap batch to disk", &e);
+                                return Err(e);
+                            }
                             current_sequence = next_available;
                         }
                     }
@@ -326,9 +349,18 @@ impl LogWriter {
                 }
 
                 if !batch.is_empty() {
-                    sink.write_batch(&batch).await?;
-                    let _ = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await?;
-                    sink.flush().await?;
+                    if let Err(e) = sink.write_batch(&batch).await {
+                        notify_disk_failure(&ring_buffer, "Failed writing batch to disk after exhausting retries", &e);
+                        return Err(e);
+                    }
+                    if let Err(e) = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await {
+                        notify_disk_failure(&ring_buffer, "Failed file rotation after batch write", &e);
+                        return Err(e);
+                    }
+                    if let Err(e) = sink.flush().await {
+                        notify_disk_failure(&ring_buffer, "Failed flushing batch to disk", &e);
+                        return Err(e);
+                    }
                 }
 
                 if buffer.is_empty() {
@@ -370,10 +402,16 @@ impl LogWriter {
             exit_batch.push(file_msg);
         }
         if !exit_batch.is_empty() {
-            let _ = sink.write_batch(&exit_batch).await;
+            if let Err(e) = sink.write_batch(&exit_batch).await {
+                notify_disk_failure(&ring_buffer, "Failed writing final exit batch to disk", &e);
+                return Err(e);
+            }
         }
 
-        sink.flush().await?;
+        if let Err(e) = sink.flush().await {
+            notify_disk_failure(&ring_buffer, "Failed flushing final exit batch to disk", &e);
+            return Err(e);
+        }
         Ok(())
     }
 
@@ -386,6 +424,31 @@ impl LogWriter {
     }
 }
 
+// -----------------------------------------------------------------------------
+
+/// Broadcast and record a fatal unrecoverable disk failure
+fn notify_disk_failure(
+    ring_buffer: &crate::core::ring_buffer::LogRingBuffer,
+    context: &str,
+    err: &std::io::Error,
+) {
+    let err_msg = format!("[DISK_FAILURE] {context}: {err}");
+    let err_entry = LogEntry {
+        timestamp: get_utc_timestamp(),
+        hostname: get_hostname().to_string(),
+        logger_name: "log_writer".to_string(),
+        level: 11, // CRITICAL
+        module: "log-server".to_string(),
+        filename: "log_writer.rs".to_string(),
+        function_name: "writer_task".to_string(),
+        line_number: "disk_io".to_string(),
+        message: err_msg.clone(),
+        service_name: "log_server".to_string(),
+        ..Default::default()
+    };
+    ring_buffer.push(err_entry);
+    eprintln!("{err_msg}");
+}
 
 // -----------------------------------------------------------------------------
 
@@ -469,6 +532,44 @@ mod tests {
         LogWriter::rotate_files(&base_path, 0).await.unwrap();
         assert!(!base_path.exists());
         assert!(!base_path.with_extension("log.0").exists());
+
+        let _ = tokio::fs::remove_dir_all(&test_dir).await;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_writer_task_fatal_disk_failure_pushes_critical_and_terminates() {
+        let test_dir = std::env::temp_dir().join(format!("log_server_test_fail_{}", std::process::id()));
+        let _ = tokio::fs::create_dir_all(&test_dir).await;
+        // Point base_file_path to an existing directory instead of a file
+        // POSIX open(O_WRONLY) on a directory returns EISDIR (fatal I/O error)
+        let invalid_file_path = test_dir.clone();
+
+        let config = WriterConfig {
+            max_retries: 1,
+            retry_delay_ms: 10,
+            ..WriterConfig::default()
+        };
+
+        let writer = LogWriter {
+            config,
+            base_file_path: invalid_file_path,
+        };
+
+        let ring_buffer = std::sync::Arc::new(crate::core::ring_buffer::LogRingBuffer::new(50));
+        let (_tx, handle) = writer.start_writer_task(ring_buffer.clone());
+
+        // Await the task handle; it should exit with Err
+        let res = handle.await.expect("Task should complete, not panic");
+        assert!(res.is_err(), "Writer task must fail on fatal disk error");
+
+        // Verify ring buffer received structured [DISK_FAILURE] CRITICAL log
+        let tail = ring_buffer.get_tail(10, None, None);
+        assert!(
+            tail.iter().any(|e| e.message.contains("[DISK_FAILURE]") && e.level == 11),
+            "Ring buffer must contain [DISK_FAILURE] with level 11 (CRITICAL)"
+        );
 
         let _ = tokio::fs::remove_dir_all(&test_dir).await;
     }
