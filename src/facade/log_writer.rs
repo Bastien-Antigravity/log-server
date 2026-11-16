@@ -15,16 +15,15 @@
 //! - gap_timeout_ms: Timeout threshold to advance sequence on missing packets (500ms).
 
 use crate::core::log_formatter::format_log_message;
+use crate::core::transactional_writer::TransactionalFileWriter;
 use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, get_utc_timestamp};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::{
-    fs::{self, File, OpenOptions},
-    io::AsyncWriteExt,
     sync::mpsc,
-    time::{sleep, Duration},
+    time::Duration,
 };
 
 /// Log writer configuration
@@ -138,13 +137,13 @@ impl LogWriter {
         config: WriterConfig,
         ring_buffer: std::sync::Arc<crate::core::ring_buffer::LogRingBuffer>,
     ) -> tokio::io::Result<()> {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&base_file_path)
-            .await?;
-            
-        let mut file_size = file.metadata().await?.len();
+        let mut sink = TransactionalFileWriter::new(
+            base_file_path,
+            config.max_retries,
+            config.retry_delay_ms,
+        )
+        .await?;
+
         let mut buffer: BTreeMap<u64, LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
         let mut batch_size = config.initial_batch_size;
@@ -186,18 +185,9 @@ impl LogWriter {
                             false,
                         );
                         let late_batch = vec![file_msg];
-                        Self::write_batch(&mut file, &mut file_size, &late_batch, &config).await?;
-                        if file_size >= config.max_file_bytes {
-                            file.flush().await?;
-                            Self::rotate_files(&base_file_path, config.backup_count).await?;
-                            file = OpenOptions::new()
-                                .create(true)
-                                .append(true)
-                                .open(&base_file_path)
-                                .await?;
-                            file_size = 0;
-                        }
-                        file.flush().await?;
+                        sink.write_batch(&late_batch).await?;
+                        let _ = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await?;
+                        sink.flush().await?;
                     }
                 }
 
@@ -243,18 +233,9 @@ impl LogWriter {
                                 false,
                             );
                             let gap_batch = vec![file_msg];
-                            Self::write_batch(&mut file, &mut file_size, &gap_batch, &config).await?;
-                            if file_size >= config.max_file_bytes {
-                                file.flush().await?;
-                                Self::rotate_files(&base_file_path, config.backup_count).await?;
-                                file = OpenOptions::new()
-                                    .create(true)
-                                    .append(true)
-                                    .open(&base_file_path)
-                                    .await?;
-                                file_size = 0;
-                            }
-                            file.flush().await?;
+                            sink.write_batch(&gap_batch).await?;
+                            let _ = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await?;
+                            sink.flush().await?;
                             current_sequence = next_available;
                         }
                     }
@@ -345,19 +326,9 @@ impl LogWriter {
                 }
 
                 if !batch.is_empty() {
-                    Self::write_batch(&mut file, &mut file_size, &batch, &config).await?;
-
-                    if file_size >= config.max_file_bytes {
-                        file.flush().await?;
-                        Self::rotate_files(&base_file_path, config.backup_count).await?;
-                        file = OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(&base_file_path)
-                            .await?;
-                        file_size = 0;
-                    }
-                    file.flush().await?;
+                    sink.write_batch(&batch).await?;
+                    let _ = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await?;
+                    sink.flush().await?;
                 }
 
                 if buffer.is_empty() {
@@ -375,6 +346,7 @@ impl LogWriter {
         }
 
         // Flush remaining messages on exit
+        let mut exit_batch = Vec::new();
         for (_, entry) in buffer {
             let level_str = crate::models::log_entry::LEVEL_STRINGS.get(entry.level as usize).unwrap_or(&"UNKNOWN");
             let file_msg = format_log_message(
@@ -395,77 +367,25 @@ impl LogWriter {
                 &entry.stack_trace,
                 false,
             );
-            let log_line = format!("{file_msg}\n");
-            file.write_all(log_line.as_bytes()).await?;
+            exit_batch.push(file_msg);
+        }
+        if !exit_batch.is_empty() {
+            let _ = sink.write_batch(&exit_batch).await;
         }
 
-        file.flush().await?;
+        sink.flush().await?;
         Ok(())
     }
 
     // -----------------------------------------------------------------------------
 
-    /// Write batch with retry logic
-    async fn write_batch(
-        file: &mut File,
-        file_size: &mut u64,
-        batch: &[String],
-        config: &WriterConfig,
-    ) -> tokio::io::Result<()> {
-        let mut written_idx = 0;
-        for attempt in 0..=config.max_retries {
-            let mut success = true;
-            while written_idx < batch.len() {
-                let log_entry = format!("{}\n", batch[written_idx]);
-                if file.write_all(log_entry.as_bytes()).await.is_err() {
-                    success = false;
-                    break;
-                }
-                *file_size += log_entry.len() as u64;
-                written_idx += 1;
-            }
 
-            if success {
-                break;
-            } else if attempt < config.max_retries {
-                sleep(Duration::from_millis(config.retry_delay_ms)).await;
-            } else {
-                return Err(std::io::Error::other("Write failed after maximum retries"));
-            }
-        }
-        Ok(())
-    }
-
-    // -----------------------------------------------------------------------------
-
-    /// Rotate log files
-    async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
-        if backup_count == 0 {
-            let _ = fs::remove_file(base_path).await;
-            return Ok(());
-        }
-
-        // Delete the oldest backup file if it exists to preserve exact backup_count
-        let oldest = base_path.with_extension(format!("log.{}", backup_count - 1));
-        if fs::metadata(&oldest).await.is_ok() {
-            let _ = fs::remove_file(&oldest).await;
-        }
-
-        for i in (1..backup_count).rev() {
-            let old_path = base_path.with_extension(format!("log.{}", i - 1));
-            let new_path = base_path.with_extension(format!("log.{i}"));
-
-            if fs::metadata(&old_path).await.is_ok() {
-                fs::rename(&old_path, &new_path).await?;
-            }
-        }
-
-        if fs::metadata(base_path).await.is_ok() {
-            fs::rename(&base_path, &base_path.with_extension("log.0")).await?;
-        }
-        Ok(())
+    /// Rotate log files (delegates to TransactionalFileWriter)
+    pub async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
+        TransactionalFileWriter::rotate_files(base_path, backup_count).await
     }
 }
+
 
 // -----------------------------------------------------------------------------
 

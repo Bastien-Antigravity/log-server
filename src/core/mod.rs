@@ -12,3 +12,4 @@ pub mod log_formatter;
 pub mod protocol_handlers;
 pub mod reorder_test;
 pub mod ring_buffer;
+pub mod transactional_writer;
