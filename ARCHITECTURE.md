@@ -51,14 +51,19 @@ The low-level transport uses a custom wrapper around Tokio's `TcpStream`.
 - **Frame Validation**: Enforces a `MAX_MESSAGE_SIZE` (10MB) and Big-Endian length prefix validation to prevent OOM attacks.
 
 ### 3. Log Writer Task
-The central orchestrator of the persistence layer.
+The central orchestrator of the persistence and sequencing layer.
 - **Sequence Integrity**: Uses a `BTreeMap` to reorder out-of-order packets.
 - **Gap Management**: If a sequence number is missing beyond the `gap_timeout_ms` (500ms), the writer inserts a synthetic `[SEQUENCE_GAP]` entry and continues.
+- **Saturation Management**: If reorder queue reaches capacity, the writer emits a `[BUFFER_PRESSURE]` log and forces progress.
 - **Non-Blocking Console**: Offloads `println!` operations to a separate async task to prevent slow terminal output from blocking disk persistence or network ingestion.
+- **In-Memory Ring Buffer**: Feeds the 5,000-slot `LogRingBuffer` in real time, supporting instant gRPC `StreamLogs` and tail queries.
 
-### 4. Storage & Rotation
-- **Atomic Writes**: Uses `AsyncWriteExt` with batch-retry logic to ensure log durability.
-- **Rotation Strategy**: Automatically rotates files when they reach 10MB, maintaining a configurable count of backups.
+### 4. Storage & Rotation (`TransactionalFileWriter`)
+- **Tier 1 (In-Memory Staging)**: Batches multiple log lines into a contiguous byte buffer before issuing write syscalls, minimizing OS overhead.
+- **Tier 2 (Rollback via Checkpointed `ftruncate`)**: Tracks initial byte offset before writes. On partial write errors, rolls file back via `ftruncate` (`file.set_len(checkpoint_offset)`) to drop incomplete records, retrying up to `max_retries`.
+- **Tier 3 (Poisoned Handle Recovery)**: If `ftruncate` fails (e.g. broken file descriptor), closes and reopens a clean handle, reconciling metadata.
+- **Rotation Strategy**: Automatically rotates files when reaching `max_file_bytes` (10MB), cascading across historical files (`.log.0` through `.log.N`).
+- **Fail-Fast Lifecycle**: If disk writes permanently fail, emits a structured `[DISK_FAILURE]` `CRITICAL` log into `LogRingBuffer` and aborts the server process with exit code 1, triggering `watchdog-agent`'s crash loop circuit breaker and Telegram alert.
 
 ## Data Flow
 

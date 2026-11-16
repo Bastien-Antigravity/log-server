@@ -173,7 +173,13 @@ pub fn spawn_web_interface_registration(config: Config, ring_capacity: usize) {
     tokio::spawn(async move {
         let web_addr = match microservice_toolbox::config::load_config("standalone") {
             Ok(ac) => match ac.get_listen_addr("web_interface") {
-                Ok(addr) if !addr.trim().is_empty() => addr,
+                Ok(addr) if !addr.trim().is_empty() => {
+                    if let Some((h, p)) = addr.rsplit_once(':') {
+                        format!("{}:{}", display_host(h), p)
+                    } else {
+                        addr
+                    }
+                }
                 _ => return,
             },
             Err(_) => return,
@@ -231,5 +237,14 @@ mod tests {
         let spec_str = build_service_spec_payload(&cfg, 5000);
         assert!(spec_str.contains("\"contracts\""));
         assert!(spec_str.contains("\"safesocket\""));
+    }
+
+    #[test]
+    fn test_display_host_normalization() {
+        assert_eq!(display_host("0.0.0.0"), "127.0.0.1");
+        assert_eq!(display_host("::"), "127.0.0.1");
+        assert_eq!(display_host(""), "127.0.0.1");
+        assert_eq!(display_host("192.168.1.50"), "192.168.1.50");
+        assert_eq!(display_host("example.local"), "example.local");
     }
 }

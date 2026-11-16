@@ -27,7 +27,10 @@ A high-performance, centralized logging server written in Rust that handles both
 - **Colorized Level Support**: Console output highlights log levels with isolated coloring and automatic ANSI reset.
 - **Async Architecture**: Built on Tokio for peak multi-threaded throughput.
 - **Dynamic Batching**: Automatically adjusts batch sizes based on current ingestion volume.
+- **Transactional Disk Recovery**: Uses `TransactionalFileWriter` with in-memory staging and `ftruncate` rollback to prevent partial or corrupted disk writes.
+- **Real-Time Streaming Egress**: 5,000-slot `LogRingBuffer` broadcasting logs to gRPC `StreamLogs` and Web Interface.
 - **Data Loss Audit**: Automatically logs `[SEQUENCE_GAP]` and `[BUFFER_PRESSURE]` entries if data is lost or delayed.
+- **Fail-Fast Fleet Supervision**: Emits `[DISK_FAILURE]` `CRITICAL` records to RAM and aborts process on exhausted retries, integrating with `watchdog-agent`'s circuit breaker and Telegram alerts.
 
 ## Architecture
 
