@@ -13,7 +13,7 @@ chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 microservice-toolbox = { git = "https://github.com/Bastien-Antigravity/microservice-toolbox.git", branch = "develop" }
-tonic = "0.9"
+tonic = "0.14"
 prost = "0.11"
 tokio-stream = { version = "0.1", features = ["sync"] }
 
