@@ -23,6 +23,8 @@ RUN cargo build --release
 # === RUNTIME STAGE ===
 FROM alpine:3.20
 
+LABEL org.opencontainers.image.source="https://github.com/Bastien-Antigravity/log-server"
+
 # Install runtime dependencies including protoc
 RUN apk add --no-cache \
     ca-certificates \

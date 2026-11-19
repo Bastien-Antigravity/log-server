@@ -99,8 +99,7 @@ fn main() {
 fn resolve_config_profile() -> &'static str {
     let in_docker = std::env::var("DOCKER_ENV")
         .map(|v| v == "true")
-        .unwrap_or(false)
-        || std::path::Path::new("/.dockerenv").exists();
+        .unwrap_or(false);
 
     if in_docker
         && (config_file_exists("production.yaml") || !config_file_exists("standalone.yaml"))
