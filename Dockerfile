@@ -5,6 +5,7 @@ LABEL org.opencontainers.image.source="https://github.com/Bastien-Antigravity/lo
 
 # Install build dependencies including protoc and git
 RUN apk add --no-cache \
+    build-base \
     git \
     musl-dev \
     capnproto \

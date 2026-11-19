@@ -4,11 +4,11 @@
 //! and gRPC logging daemons.
 //!
 //! DATA FLOW:
-//! 1. CLI / Config slice -> load_config("standalone")
+//! 1. Runtime environment -> resolve_config_profile() -> load_config(profile)
 //! 2. LogServer::new() -> LogServer::run()
 //!
 //! KEY PARAMETERS:
-//! - standalone.yaml / local config: Listen host, TCP port (9020), gRPC port (9021).
+//! - production.yaml / standalone.yaml: Listen host, TCP port (9020), gRPC port (9021).
 //! - APP_VERSION: Injected compilation semver from build.rs.
 
 use log_server::facade::log_server::LogServer;
@@ -18,7 +18,8 @@ use log_server::utils::terminal_ui::print_internal_log;
 pub const VERSION: &str = env!("APP_VERSION");
 
 fn main() {
-    let ac = match microservice_toolbox::config::load_config("standalone") {
+    let profile = resolve_config_profile();
+    let ac = match microservice_toolbox::config::load_config(profile) {
         Ok(ac) => ac,
         Err(e) => {
             eprintln!("Error loading configuration: {}", e);
@@ -92,7 +93,44 @@ fn main() {
     }
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
+
+/// Resolves the configuration profile based on runtime environment (Docker vs local).
+fn resolve_config_profile() -> &'static str {
+    let in_docker = std::env::var("DOCKER_ENV")
+        .map(|v| v == "true")
+        .unwrap_or(false)
+        || std::path::Path::new("/.dockerenv").exists();
+
+    if in_docker
+        && (config_file_exists("production.yaml") || !config_file_exists("standalone.yaml"))
+    {
+        return "production";
+    }
+
+    "standalone"
+}
+
+//-----------------------------------------------------------------------------------------------
+
+/// Checks whether a profile configuration file exists in standard lookup locations.
+fn config_file_exists(filename: &str) -> bool {
+    if std::path::Path::new(filename).exists()
+        || std::path::Path::new("config").join(filename).exists()
+    {
+        return true;
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join(filename).exists() || dir.join("config").join(filename).exists();
+        }
+    }
+
+    false
+}
+
+//-----------------------------------------------------------------------------------------------
 
 /// Main server execution function
 fn run_server(
