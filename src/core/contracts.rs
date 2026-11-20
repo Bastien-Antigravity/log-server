@@ -2,7 +2,17 @@
 //! Constructs exhaustive, compile-time embedded Exchange Contracts directly
 //! from log-server schemas (log_service.proto, logger.capnp, and SafeSocket framing)
 //! and publishes ServiceSpec metadata to web-interface.
+//!
+//! DATA FLOW:
+//! 1. Active AppConfig + Config -> build_exchange_contracts_value() / resolve_web_interface_addr()
+//! 2. spawn_web_interface_registration() -> HTTP POST /api/v1/register -> web-interface
+//!
+//! KEY PARAMETERS:
+//! - config: Runtime TCP/gRPC host and port configuration.
+//! - ring_capacity: In-memory LogRingBuffer capacity reported in ServiceSpec.
+//! - app_config: Active pre-loaded AppConfig for web_interface service discovery.
 
+use microservice_toolbox::config::loader::AppConfig;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -13,7 +23,7 @@ use crate::config::config::Config;
 pub const LOG_SERVICE_PROTO: &str = include_str!("../schema/proto/log_service.proto");
 pub const LOGGER_CAPNP_SCHEMA: &str = include_str!("../schema/capnp/logger.capnp");
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 fn display_host(host: &str) -> &str {
     if host.is_empty() || host == "0.0.0.0" || host == "::" {
@@ -23,11 +33,14 @@ fn display_host(host: &str) -> &str {
     }
 }
 
+//-----------------------------------------------------------------------------------------------
+
 /// Build exhaustive list of log-server exchange contracts anchored to runtime config & real schema files.
 pub fn build_exchange_contracts_value(config: &Config, ring_capacity: usize) -> Value {
     let host = display_host(&config.host);
+    let grpc_host = display_host(&config.grpc_host);
     let tcp_addr = format!("{}:{}", host, config.port);
-    let grpc_addr = format!("{}:{}", host, config.grpc_port);
+    let grpc_addr = format!("{}:{}", grpc_host, config.grpc_port);
 
     let safesocket_spec = [
         "1. Connection Establishment (SafeSocket TCP Handshake / ADR-001):",
@@ -124,10 +137,14 @@ pub fn build_exchange_contracts_value(config: &Config, ring_capacity: usize) -> 
     ])
 }
 
+//-----------------------------------------------------------------------------------------------
+
 /// Build JSON string of exchange contracts for gRPC GetExchangeContracts.
 pub fn build_exchange_contracts_json(config: &Config, ring_capacity: usize) -> String {
     serde_json::to_string(&build_exchange_contracts_value(config, ring_capacity)).unwrap_or_else(|_| "[]".to_string())
 }
+
+//-----------------------------------------------------------------------------------------------
 
 /// Build canonical OpenMFE ServiceSpec payload for POST /api/v1/register on web-interface.
 pub fn build_service_spec_payload(config: &Config, ring_capacity: usize) -> String {
@@ -168,23 +185,37 @@ pub fn build_service_spec_payload(config: &Config, ring_capacity: usize) -> Stri
     payload.to_string()
 }
 
-/// Non-blocking 30s heartbeat registering log-server's authoritative contracts with web-interface.
-pub fn spawn_web_interface_registration(config: Config, ring_capacity: usize) {
-    tokio::spawn(async move {
-        let web_addr = match microservice_toolbox::config::load_config("standalone") {
-            Ok(ac) => match ac.get_listen_addr("web_interface") {
-                Ok(addr) if !addr.trim().is_empty() => {
-                    if let Some((h, p)) = addr.rsplit_once(':') {
-                        format!("{}:{}", display_host(h), p)
-                    } else {
-                        addr
-                    }
-                }
-                _ => return,
-            },
-            Err(_) => return,
-        };
+//-----------------------------------------------------------------------------------------------
 
+/// Resolve the `web_interface` registration address from the active `AppConfig`.
+pub fn resolve_web_interface_addr(app_config: &AppConfig) -> Option<String> {
+    let addr = app_config.get_listen_addr("web_interface").ok()?;
+    let trimmed = addr.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((h, p)) = trimmed.rsplit_once(':') {
+        Some(format!("{}:{}", display_host(h), p))
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+//-----------------------------------------------------------------------------------------------
+
+/// Non-blocking 30s heartbeat registering log-server's authoritative contracts with web-interface.
+pub fn spawn_web_interface_registration(
+    config: Config,
+    ring_capacity: usize,
+    app_config: Option<&AppConfig>,
+) {
+    let web_addr = match app_config.and_then(resolve_web_interface_addr) {
+        Some(addr) => addr,
+        None => return,
+    };
+
+    tokio::spawn(async move {
         let payload = build_service_spec_payload(&config, ring_capacity);
         let mut delay = Duration::from_secs(1);
 
@@ -217,19 +248,26 @@ pub fn spawn_web_interface_registration(config: Config, ring_capacity: usize) {
     });
 }
 
+//-----------------------------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_build_exchange_contracts_embeds_real_schemas() {
-        let cfg = Config::new("log_server", "0.0.0.0", 9020, 9021);
+        let cfg = Config::new("log_server", "0.0.0.0", 19020, 19021).with_grpc_host("log-server");
         let json_str = build_exchange_contracts_json(&cfg, 5000);
         let parsed: Value = serde_json::from_str(&json_str).expect("valid contracts json");
         let arr = parsed.as_array().expect("contracts array");
         assert_eq!(arr.len(), 3);
         assert_eq!(arr[0]["id"], "safesocket");
+        assert_eq!(arr[0]["address"], "127.0.0.1:19020");
         assert_eq!(arr[1]["id"], "proto");
+        assert_eq!(arr[1]["address"], "log-server:19021");
         assert_eq!(arr[2]["id"], "capnp");
         assert!(arr[1]["schema"].as_str().unwrap().contains("GetExchangeContracts"));
         assert!(arr[2]["schema"].as_str().unwrap().contains("struct LoggerMsg"));
@@ -246,5 +284,39 @@ mod tests {
         assert_eq!(display_host(""), "127.0.0.1");
         assert_eq!(display_host("192.168.1.50"), "192.168.1.50");
         assert_eq!(display_host("example.local"), "example.local");
+    }
+
+    #[test]
+    fn test_resolve_web_interface_addr_from_app_config() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = std::env::temp_dir().join(format!("log_server_contracts_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let empty_cfg_path = dir.join("empty.yaml");
+        std::fs::write(&empty_cfg_path, "{}\n").expect("write empty temp config");
+
+        let prev_cfg_path = std::env::var_os("CONFIG_PATH");
+        std::env::set_var("CONFIG_PATH", &empty_cfg_path);
+        let empty_ac = microservice_toolbox::config::load_config("empty").expect("load empty config");
+        assert_eq!(resolve_web_interface_addr(&empty_ac), None);
+
+        let cfg_path = dir.join("production.yaml");
+        std::fs::write(
+            &cfg_path,
+            "capabilities:\n  web_interface:\n    ip: web-interface\n    port: '15000'\n",
+        )
+        .expect("write temp config");
+
+        std::env::set_var("CONFIG_PATH", &cfg_path);
+        let ac = microservice_toolbox::config::load_config("production").expect("load temp config");
+        match prev_cfg_path {
+            Some(v) => std::env::set_var("CONFIG_PATH", v),
+            None => std::env::remove_var("CONFIG_PATH"),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            resolve_web_interface_addr(&ac),
+            Some("web-interface:15000".to_string())
+        );
     }
 }

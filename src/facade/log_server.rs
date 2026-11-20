@@ -13,6 +13,7 @@
 //! - host / port: TCP socket binding (default 0.0.0.0:9020).
 //! - grpc_port: gRPC bridge endpoint (default 9021).
 
+use microservice_toolbox::config::loader::AppConfig;
 use std::sync::Arc;
 
 use crate::config::config::Config;
@@ -29,9 +30,10 @@ pub struct LogServer {
     config: Config,
     writer: Arc<LogWriter>,
     enable_grpc: bool,
+    app_config: Option<Arc<AppConfig>>,
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 impl LogServer {
     /// Create new log server instance
@@ -43,7 +45,17 @@ impl LogServer {
         enable_grpc: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let config = Config::new(name, host, port, grpc_port);
+        Self::new_with_config(config, enable_grpc, None).await
+    }
 
+    //-----------------------------------------------------------------------------------------------
+
+    /// Create new log server instance from a full `Config` and optional active `AppConfig`
+    pub async fn new_with_config(
+        config: Config,
+        enable_grpc: bool,
+        app_config: Option<Arc<AppConfig>>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         // Create resolved log directory (LOG_DIR -> DOCKER_ENV=true -> <exec_parent>/logs)
         let log_dir = crate::utils::helpers::resolve_log_dir();
         if let Some(log_dir_str) = log_dir.to_str() {
@@ -54,14 +66,15 @@ impl LogServer {
         let writer = Arc::new(LogWriter::new().await?);
 
         Ok(Self {
-            name: name.to_string(),
+            name: config.name.clone(),
             config,
             writer,
             enable_grpc,
+            app_config,
         })
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Run the log server with all components
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error>> {
@@ -157,7 +170,11 @@ impl LogServer {
         );
 
         // Publish exhaustive OpenMFE spec + contracts asynchronously to web-interface
-        crate::core::contracts::spawn_web_interface_registration(self.config.clone(), 5000);
+        crate::core::contracts::spawn_web_interface_registration(
+            self.config.clone(),
+            5000,
+            self.app_config.as_deref(),
+        );
 
         // Wait for servers or writer task to complete; abort if any fails
         tokio::select! {
