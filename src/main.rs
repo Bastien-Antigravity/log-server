@@ -163,7 +163,9 @@ fn resolve_config_profile() -> String {
     if let Ok(profile) = std::env::var("CONFIG_PROFILE") {
         let trimmed = profile.trim();
         if !trimmed.is_empty() {
-            return trimmed.to_string();
+            if config_file_exists(&format!("{trimmed}.yaml")) {
+                return trimmed.to_string();
+            }
         }
     }
 
