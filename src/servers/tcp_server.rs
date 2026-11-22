@@ -4,12 +4,12 @@
 //!
 //! DATA FLOW:
 //! 1. TCP Stream -> SafeSocket framing -> Cap'n Proto deserialization
-//! 2. LogEntry + Sequence Counter -> LogPacket -> writer_tx
+//! 2. LogEntry -> LogPacket -> writer_tx (sequenced authoritatively in LogWriter)
 //!
 //! KEY PARAMETERS:
 //! - host / port: Socket bind address (default 0.0.0.0:9020).
-//! - writer_tx: Channel to async file writer task.
-//! - sequence_counter: Atomic sequence tracking for global ordering.
+//! - writer_tx: Channel to single-authority FIFO async file writer task.
+//! - sequence_counter: Retained handle for API compatibility.
 
 use crate::models::log_packet::LogPacket;
 use std::sync::atomic::AtomicU64;

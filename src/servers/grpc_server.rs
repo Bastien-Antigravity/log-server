@@ -1,9 +1,9 @@
 //! ESSENTIAL PROCESS:
-//! gRPC server for log messages, supporting high-throughput ingestion,
+//! gRPC server for log messages, supporting high-throughput FIFO ingestion,
 //! ring-buffer querying (GetTailLogs), and real-time streaming (StreamLogs).
 //!
 //! DATA FLOW:
-//! 1. Ingest: Incoming LogRequest -> handle_grpc_message -> writer_tx
+//! 1. Ingest: Incoming LogRequest -> handle_grpc_message -> writer_tx (FIFO LogWriter)
 //! 2. Query:  GetTailLogs -> LogRingBuffer.get_tail() -> TailLogsResponse
 //! 3. Stream: StreamLogs -> LogRingBuffer.subscribe() -> HTTP/2 server-streaming
 //!

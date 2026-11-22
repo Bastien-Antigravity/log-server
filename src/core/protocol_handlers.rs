@@ -1,21 +1,22 @@
 //! ESSENTIAL PROCESS:
 //! Binary protocol decoding and message validation handlers. Unpacks Cap'n Proto
-//! messages from SafeSocket frames and translates gRPC payloads into LogPacket instances.
+//! messages from SafeSocket frames and translates gRPC payloads into LogPacket instances
+//! for single-authority FIFO sequencing inside LogWriter.
 //!
 //! DATA FLOW:
 //! 1. SafeSocket bytes -> Cap'n Proto Reader -> LogEntry
 //! 2. gRPC ProtoLogRequest -> LogEntry
-//! 3. LogEntry + Sequence Counter -> LogPacket -> writer_tx
+//! 3. LogEntry -> LogPacket -> writer_tx (sequenced authoritatively by LogWriter)
 //!
 //! KEY PARAMETERS:
 //! - identify_client_from_handshake: Extracts sender identity from initial connection.
 //! - handle_tcp_message: Unpacks packed Cap'n Proto bytes into LogPacket.
-//! - handle_grpc_message: Wraps gRPC LogEntry with sequence number into LogPacket.
+//! - handle_grpc_message: Enqueues gRPC LogEntry into writer_tx FIFO channel.
 
 use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use capnp::{message::ReaderOptions, serialize, serialize_packed};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -58,13 +59,13 @@ pub fn identify_client_from_handshake(data: &[u8]) -> Result<String, String> {
     ))
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 /// Handle incoming TCP client connection
 pub async fn handle_tcp_message(
     data: Vec<u8>,
     writer_tx: mpsc::Sender<LogPacket>,
-    sequence_counter: Arc<AtomicU64>,
+    _sequence_counter: Arc<AtomicU64>,
     _client_name: &str,
 ) -> Result<(), String> {
     // 1. Deserialization
@@ -155,28 +156,29 @@ pub async fn handle_tcp_message(
             .unwrap_or_default(),
     };
 
-    // 3. Send to writer with sequence number
-    let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
+    // 3. Enqueue into FIFO writer channel (LogWriter is the single sequence authority)
     writer_tx
-        .send(LogPacket { sequence, entry })
+        .send(LogPacket {
+            sequence: 0,
+            entry,
+        })
         .await
         .map_err(|e| format!("failed to queue message: {e}"))?;
 
     Ok(())
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 /// Handle gRPC log message
 pub async fn handle_grpc_message(
     log_request: LogEntry,
     writer_tx: mpsc::Sender<LogPacket>,
-    sequence_counter: Arc<AtomicU64>,
+    _sequence_counter: Arc<AtomicU64>,
 ) -> Result<(), String> {
-    let sequence = sequence_counter.fetch_add(1, Ordering::SeqCst);
     writer_tx
         .send(LogPacket {
-            sequence,
+            sequence: 0,
             entry: log_request,
         })
         .await
@@ -185,7 +187,7 @@ pub async fn handle_grpc_message(
     Ok(())
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

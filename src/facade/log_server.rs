@@ -1,11 +1,11 @@
 //! ESSENTIAL PROCESS:
 //! Main log server orchestrator coordinating TCP socket (Cap'n Proto) and
-//! high-throughput gRPC (HTTP/2) with ordered asynchronous file writing,
+//! high-throughput gRPC (HTTP/2) with single-authority FIFO asynchronous file writing,
 //! rotation, and real-time broadcast streaming.
 //!
 //! DATA FLOW:
-//! 1. TCP/gRPC clients -> writer_tx / sequence_counter
-//! 2. WriterTask flushes ordered batches to files and updates LogRingBuffer
+//! 1. TCP/gRPC clients -> writer_tx FIFO channel
+//! 2. WriterTask sequences and flushes ordered batches to files and updates LogRingBuffer
 //! 3. gRPC StreamLogs -> ring_buffer broadcast -> real-time HTTP/2 stream
 //!
 //! KEY PARAMETERS:

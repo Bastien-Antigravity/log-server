@@ -3,9 +3,9 @@
 //! and core exports for centralized Cap'n Proto TCP and tonic gRPC services.
 //!
 //! DATA FLOW:
-//! 1. Ingestors (TCP / gRPC) -> Sequence Counter
-//! 2. Protocol Handlers -> LogPacket -> BTreeMap Reorder Buffer
-//! 3. WriterTask -> LogRingBuffer & Disk Persistence (_main.log)
+//! 1. Ingestors (TCP / gRPC) -> Protocol Handlers -> LogPacket
+//! 2. MPSC FIFO Channel -> Single-Authority LogWriter Task
+//! 3. LogWriter Task -> Transactional Disk Persistence (_main.log) & LogRingBuffer
 //!
 //! KEY PARAMETERS:
 //! - config, core, facade, models, protocols, servers, transport, utils.

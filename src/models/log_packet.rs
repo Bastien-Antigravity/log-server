@@ -1,12 +1,13 @@
 //! ESSENTIAL PROCESS:
-//! Internal sequenced log packet wrapping a LogEntry with a global monotonic sequence.
+//! Internal sequenced log packet wrapping a LogEntry with a monotonic sequence number
+//! assigned authoritatively by LogWriter upon FIFO channel reception.
 //!
 //! DATA FLOW:
-//! 1. Protocol Handlers wrap LogEntry with atomic sequence -> LogPacket
-//! 2. LogPacket -> MPSC channel -> WriterTask BTreeMap buffer
+//! 1. Protocol Handlers wrap LogEntry -> LogPacket -> MPSC writer_tx channel
+//! 2. LogWriter assigns monotonic FIFO sequence and persists batch to disk & LogRingBuffer
 //!
 //! KEY PARAMETERS:
-//! - sequence: Global atomic counter value for ordered stream reconstruction.
+//! - sequence: Monotonic sequence value assigned by single-authority LogWriter.
 //! - entry: Decoded LogEntry payload.
 
 use crate::models::log_entry::LogEntry;

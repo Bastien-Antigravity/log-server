@@ -1,3 +1,4 @@
+// cli:allow-print
 //! ESSENTIAL PROCESS:
 //! Transactional disk persistence engine with in-memory batch staging (Tier 1),
 //! checkpointed ftruncate rollback on partial write errors (Tier 2),
@@ -120,17 +121,17 @@ impl TransactionalFileWriter {
         Err(std::io::Error::other("Write failed after maximum retries"))
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Roll back the file length and cursor to the specified clean checkpoint offset
     pub async fn rollback_to(&mut self, checkpoint_offset: u64) -> tokio::io::Result<()> {
         self.file.set_len(checkpoint_offset).await?;
-        let _ = self.file.seek(SeekFrom::End(0)).await;
+        self.file.seek(SeekFrom::End(0)).await?;
         self.file_size = checkpoint_offset;
         Ok(())
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Tier 3: Recovers from a poisoned file descriptor when truncation fails.
     /// Drops the current corrupted handle, opens a fresh descriptor, and synchronizes metadata.
@@ -144,17 +145,23 @@ impl TransactionalFileWriter {
         self.file = fresh_file;
         let actual_len = self.file.metadata().await?.len();
 
-        // If file expanded beyond checkpoint due to the partial write, attempt truncate on fresh descriptor
+        // If file expanded beyond checkpoint due to the partial write, truncate on fresh descriptor
         if actual_len > checkpoint_offset {
-            let _ = self.file.set_len(checkpoint_offset).await;
-            let _ = self.file.seek(SeekFrom::End(0)).await;
+            self.file.set_len(checkpoint_offset).await?;
+            self.file.seek(SeekFrom::End(0)).await?;
         }
 
         self.file_size = self.file.metadata().await?.len();
+        if self.file_size != checkpoint_offset {
+            return Err(std::io::Error::other(format!(
+                "Failed to restore clean record boundary after handle recovery: expected offset {}, found {}",
+                checkpoint_offset, self.file_size
+            )));
+        }
         Ok(())
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Check if rotation threshold is met and perform cascading rotation
     pub async fn check_and_rotate(
@@ -313,6 +320,39 @@ mod tests {
         assert_eq!(writer.file_size(), 0);
 
         assert!(base_path.with_extension("log.0").exists());
+
+        let _ = fs::remove_dir_all(&test_dir).await;
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_recover_poisoned_handle_restores_checkpoint_boundary() {
+        let test_dir = std::env::temp_dir().join(format!("test_txn_recover_{}", std::process::id()));
+        let _ = fs::create_dir_all(&test_dir).await;
+        let base_path = test_dir.join("_main.log");
+
+        let mut writer = TransactionalFileWriter::new(base_path.clone(), 2, 10)
+            .await
+            .unwrap();
+
+        writer.write_batch(&["record_alpha".to_string()]).await.unwrap();
+        writer.flush().await.unwrap();
+        let checkpoint = writer.file_size();
+
+        // Simulate partial write beyond checkpoint before handle recovery
+        writer.file.write_all(b"CORRUPT_TAIL").await.unwrap();
+        writer.file.flush().await.unwrap();
+
+        writer.recover_poisoned_handle(checkpoint).await.unwrap();
+        assert_eq!(writer.file_size(), checkpoint);
+
+        let content = fs::read_to_string(&base_path).await.unwrap();
+        assert_eq!(content, "record_alpha\n");
+
+        // Verify fails if checkpoint is unreachable (e.g. file shorter than expected checkpoint)
+        let err = writer.recover_poisoned_handle(checkpoint + 100).await;
+        assert!(err.is_err(), "Mismatch between recovered file size and checkpoint must return error");
 
         let _ = fs::remove_dir_all(&test_dir).await;
     }

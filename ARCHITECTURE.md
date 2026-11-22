@@ -25,17 +25,18 @@ The Log Server is designed as a centralized, non-blocking log ingestion and orde
 ```mermaid
 graph TD
     Sources[Fleet Services] <-->|Cap'n Proto / gRPC| Ingestors(TCP & gRPC Ingestors)
-    Ingestors -->|LogPacket| Sequencer(Sequence Counter)
-    Sequencer -->|Ordered Entry| Buffer(BTreeMap Reorder Buffer)
+    Ingestors -->|LogPacket| Channel(MPSC FIFO Channel)
     
-    subgraph "Async Processing Core"
-        Buffer -->|Batch Flush| LogWriter(Log Writer Task)
+    subgraph "Async Processing Core (Single-Authority LogWriter)"
+        Channel -->|FIFO Dequeue & Burst Drain| LogWriter(Log Writer Task)
         LogWriter -->|Async Task| Console(Async Console Worker)
-        LogWriter -->|Retry Logic| Disk[_main.log]
+        LogWriter -->|Transactional Batch Write| Disk[_main.log]
+        LogWriter -->|Exact Persistence Order| RingBuffer(LogRingBuffer 5,000 Slots)
     end
     
     Console -->|println!| Stdout[Terminal/Pipe]
     Disk -->|Rotation| Backups[_main.log.N]
+    RingBuffer -->|Broadcast| Stream[gRPC StreamLogs / GetTailLogs]
 ```
 
 ### 1. Ingestion Layer
@@ -50,18 +51,18 @@ The low-level transport uses a custom wrapper around Tokio's `TcpStream`.
 - **Memory Optimization**: Uses a reusable stack-based buffer for chunked reading to eliminate heap churn during high-volume ingestion.
 - **Frame Validation**: Enforces a `MAX_MESSAGE_SIZE` (10MB) and Big-Endian length prefix validation to prevent OOM attacks.
 
-### 3. Log Writer Task
+### 3. Log Writer Task (Single-Authority FIFO Sequencing)
 The central orchestrator of the persistence and sequencing layer.
-- **Sequence Integrity**: Uses a `BTreeMap` to reorder out-of-order packets.
-- **Gap Management**: If a sequence number is missing beyond the `gap_timeout_ms` (500ms), the writer inserts a synthetic `[SEQUENCE_GAP]` entry and continues.
-- **Saturation Management**: If reorder queue reaches capacity, the writer emits a `[BUFFER_PRESSURE]` log and forces progress.
+- **Single-Authority FIFO Ordering**: `LogWriter::writer_task` is the sole sequence and serialization authority (`current_sequence: u64`). Producers enqueue `LogPacket` entries into the bounded MPSC channel without pre-channel atomic sequence races, and `writer_task` sequences them in strict FIFO arrival order.
+- **Dynamic Burst Batching**: On receiving a packet from `rx.recv()`, `writer_task` drains any immediately available packets via `rx.try_recv()` up to `batch_size`, coalescing high-throughput bursts into a single transactional `write_batch` syscall.
+- **Deterministic Shutdown Draining**: Matches `rx.recv()` for `None` explicitly inside `tokio::select!`, breaking out of the event loop when all producers drop and flushing any remaining batch before exit.
 - **Non-Blocking Console**: Offloads `println!` operations to a separate async task to prevent slow terminal output from blocking disk persistence or network ingestion.
-- **In-Memory Ring Buffer**: Feeds the 5,000-slot `LogRingBuffer` in real time, supporting instant gRPC `StreamLogs` and tail queries.
+- **In-Memory Ring Buffer**: Publishes committed entries to the 5,000-slot `LogRingBuffer` immediately after disk batch persistence, guaranteeing identical FIFO ordering between `_main.log` and gRPC `StreamLogs` / `GetTailLogs`.
 
 ### 4. Storage & Rotation (`TransactionalFileWriter`)
 - **Tier 1 (In-Memory Staging)**: Batches multiple log lines into a contiguous byte buffer before issuing write syscalls, minimizing OS overhead.
 - **Tier 2 (Rollback via Checkpointed `ftruncate`)**: Tracks initial byte offset before writes. On partial write errors, rolls file back via `ftruncate` (`file.set_len(checkpoint_offset)`) to drop incomplete records, retrying up to `max_retries`.
-- **Tier 3 (Poisoned Handle Recovery)**: If `ftruncate` fails (e.g. broken file descriptor), closes and reopens a clean handle, reconciling metadata.
+- **Tier 3 (Poisoned Handle Recovery)**: If `ftruncate` fails (e.g. broken file descriptor), closes and reopens a clean handle, propagates truncation/seek errors on the fresh descriptor, and verifies `file_size == checkpoint_offset` so an unrecoverable rollback failure is treated as a fatal disk error.
 - **Rotation Strategy**: Automatically rotates files when reaching `max_file_bytes` (10MB), cascading across historical files (`.log.0` through `.log.N`).
 - **Fail-Fast Lifecycle**: If disk writes permanently fail, emits a structured `[DISK_FAILURE]` `CRITICAL` log into `LogRingBuffer` and aborts the server process with exit code 1, triggering `watchdog-agent`'s crash loop circuit breaker and Telegram alert.
 
@@ -69,12 +70,11 @@ The central orchestrator of the persistence and sequencing layer.
 
 ### Log Ingestion Flow
 1. **Source** sends a framed message.
-2. **Ingestor** reads length, validates, and deserializes the payload.
-3. **Sequencer** assigns a global sequence number (`AtomicU64`).
-4. **Buffer** stores the entry in a `BTreeMap`.
-5. **LogWriter** waits for the next expected sequence number or a timeout.
-6. **Persistence**: The entry is formatted and written to disk in a batch.
-7. **Observation**: The entry is queued for the async console worker.
+2. **Ingestor** reads length, validates, and deserializes the payload into a `LogEntry`.
+3. **Channel** enqueues the `LogPacket` into the bounded MPSC queue in FIFO acceptance order.
+4. **LogWriter** dequeues the packet, assigns the authoritative monotonic sequence number, and drains available burst packets up to `batch_size`.
+5. **Persistence**: The batch is formatted and transactionally committed to `_main.log` (with size rotation check and flush).
+6. **Ring Buffer & Observation**: Committed entries are published to `LogRingBuffer` in exact persistence order and queued for the async console worker.
 
 ## Dependencies
 

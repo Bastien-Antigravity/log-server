@@ -1,17 +1,18 @@
+// cli:allow-print
 //! ESSENTIAL PROCESS:
 //! Terminal UI formatting, ANSI color palettes, and internal log-server self-logging.
 //!
 //! DATA FLOW:
 //! 1. Internal logging calls -> print_internal_log()
 //! 2. Colored formatting output to stdout
-//! 3. Asynchronous queue dispatch to writer task for disk persistence
+//! 3. Asynchronous FIFO queue dispatch to writer task for disk persistence
 //!
 //! KEY PARAMETERS:
 //! - INTERNAL_SENDER: OnceLock channel to writer task for self-logging.
-//! - INTERNAL_COUNTER: OnceLock atomic sequence counter.
+//! - INTERNAL_COUNTER: OnceLock atomic handle retained for signature compatibility.
 
 use chrono::Utc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
 
@@ -22,11 +23,15 @@ use crate::utils::helpers::{get_hostname, truncate};
 static INTERNAL_SENDER: OnceLock<mpsc::Sender<LogPacket>> = OnceLock::new();
 static INTERNAL_COUNTER: OnceLock<Arc<AtomicU64>> = OnceLock::new();
 
+//-----------------------------------------------------------------------------------------------
+
 /// Initialize the internal logger with a sender and counter
 pub fn set_internal_logger(sender: mpsc::Sender<LogPacket>, counter: Arc<AtomicU64>) {
     let _ = INTERNAL_SENDER.set(sender);
     let _ = INTERNAL_COUNTER.set(counter);
 }
+
+//-----------------------------------------------------------------------------------------------
 
 // ANSI color codes
 pub const COLOR_RESET: &str = "\x1b[0m";
@@ -48,6 +53,8 @@ pub fn colorize_level(level: &str) -> String {
     };
     format!("{color}{:<10}{COLOR_RESET}", truncate(level, 10))
 }
+
+//-----------------------------------------------------------------------------------------------
 
 /// Formats and prints an internal server log message (visual alignment only)
 pub fn print_internal_log(
@@ -76,9 +83,8 @@ pub fn print_internal_log(
         );
     }
 
-    // 2. Map to internal LogEntry and queue for file write
-    if let (Some(sender), Some(counter)) = (INTERNAL_SENDER.get(), INTERNAL_COUNTER.get()) {
-        let seq = counter.fetch_add(1, Ordering::SeqCst);
+    // 2. Map to internal LogEntry and queue for file write (sequenced authoritatively by LogWriter)
+    if let Some(sender) = INTERNAL_SENDER.get() {
         let sender = sender.clone();
 
         let entry = LogEntry {
@@ -109,7 +115,7 @@ pub fn print_internal_log(
         };
 
         let packet = LogPacket {
-            sequence: seq,
+            sequence: 0,
             entry,
         };
         if let Err(tokio::sync::mpsc::error::TrySendError::Full(packet)) = sender.try_send(packet) {

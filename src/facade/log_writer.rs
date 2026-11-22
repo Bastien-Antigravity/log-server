@@ -1,25 +1,26 @@
+// cli:allow-print
 //! ESSENTIAL PROCESS:
-//! Asynchronous ordered file writer and rotation coordinator. Buffers incoming
-//! packets into a sequence BTreeMap, flushes batches to _main.log, handles size-based
-//! rotation, and feeds the in-memory circular ring buffer.
+//! Asynchronous single-authority FIFO file writer and rotation coordinator. Assigns
+//! monotonic sequence numbers upon channel dequeue, drains bursts into contiguous batches,
+//! flushes transactionally to _main.log, handles size-based rotation, and feeds the
+//! in-memory circular ring buffer in exact persistence order.
 //!
 //! DATA FLOW:
-//! 1. LogPacket stream from MPSC channel
-//! 2. BTreeMap reordering buffer sorted by atomic sequence
-//! 3. LogRingBuffer insertion and async disk batch write
-//! 4. Background console task queuing (non-blocking)
+//! 1. LogPacket stream from MPSC channel (FIFO arrival order)
+//! 2. Single-authority sequence assignment and burst draining up to batch_size
+//! 3. Transactional disk batch write, rotation check, and flush
+//! 4. Committed LogRingBuffer publication and non-blocking background console dispatch
 //!
 //! KEY PARAMETERS:
 //! - max_file_bytes: 10MB per log chunk before rotation.
 //! - backup_count: Number of historical rotated log files preserved (default 10).
-//! - gap_timeout_ms: Timeout threshold to advance sequence on missing packets (500ms).
+//! - gap_timeout_ms: Periodic flush interval clamping window in milliseconds.
 
 use crate::core::log_formatter::format_log_message;
 use crate::core::transactional_writer::TransactionalFileWriter;
 use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, get_utc_timestamp};
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tokio::{
     sync::mpsc,
@@ -38,7 +39,7 @@ pub struct WriterConfig {
     pub gap_timeout_ms: u64,
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 impl Default for WriterConfig {
     fn default() -> Self {
@@ -54,15 +55,15 @@ impl Default for WriterConfig {
     }
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
-/// File writer with ordering and rotation
+/// File writer with single-authority FIFO sequencing and rotation
 pub struct LogWriter {
     config: WriterConfig,
     pub(crate) base_file_path: PathBuf,
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 impl LogWriter {
     /// Create new log writer with default config
@@ -70,7 +71,7 @@ impl LogWriter {
         Self::with_config(WriterConfig::default()).await
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Create new log writer with custom config
     pub async fn with_config(config: WriterConfig) -> Result<Self, std::io::Error> {
@@ -89,7 +90,7 @@ impl LogWriter {
         })
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Create new log writer with custom config and explicit file path
     pub async fn with_config_and_path(
@@ -108,7 +109,7 @@ impl LogWriter {
         })
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
     /// Start the writer task with in-memory ring buffer support, returning the sender channel
     /// and the background task JoinHandle for lifecycle supervision and fail-fast termination.
@@ -127,9 +128,16 @@ impl LogWriter {
         (writer_tx, handle)
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
-    /// Main writer task implementation
+    /// Rotate log files (delegates to TransactionalFileWriter)
+    pub async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
+        TransactionalFileWriter::rotate_files(base_path, backup_count).await
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Main writer task implementation (single serialization and sequence authority)
     async fn writer_task(
         mut rx: mpsc::Receiver<LogPacket>,
         base_file_path: PathBuf,
@@ -141,7 +149,8 @@ impl LogWriter {
             config.max_retries,
             config.retry_delay_ms,
         )
-        .await {
+        .await
+        {
             Ok(s) => s,
             Err(e) => {
                 notify_disk_failure(&ring_buffer, "Failed to initialize transactional writer", &e);
@@ -149,11 +158,14 @@ impl LogWriter {
             }
         };
 
-        let mut buffer: BTreeMap<u64, LogEntry> = BTreeMap::new();
         let mut current_sequence: u64 = 0;
-        let mut batch_size = config.initial_batch_size;
-        let gap_duration = Duration::from_millis(config.gap_timeout_ms);
-        let mut gap_timer = tokio::time::interval_at(tokio::time::Instant::now() + gap_duration, gap_duration);
+        let mut batch_size = config.initial_batch_size.max(1);
+        let mut pending_batch: Vec<String> = Vec::with_capacity(batch_size);
+        let mut pending_entries: Vec<LogEntry> = Vec::with_capacity(batch_size);
+
+        let flush_duration = Duration::from_millis(config.gap_timeout_ms.clamp(5, 100));
+        let mut flush_timer =
+            tokio::time::interval_at(tokio::time::Instant::now() + flush_duration, flush_duration);
 
         // ASYNC CONSOLE WORKER: Prevent blocking the writer task with println!
         let (console_tx, mut console_rx) = mpsc::channel::<String>(2048);
@@ -165,247 +177,84 @@ impl LogWriter {
 
         loop {
             tokio::select! {
-                // Branch 1: Incoming structured packets
-                Some(packet) = rx.recv() => {
-                    ring_buffer.push(packet.entry.clone());
-                    if packet.sequence >= current_sequence {
-                        buffer.insert(packet.sequence, packet.entry);
-                    } else {
-                        // Late-arriving packet: write immediately rather than silently dropping [LS-3]
-                        let level_str = crate::models::log_entry::LEVEL_STRINGS.get(packet.entry.level as usize).unwrap_or(&"UNKNOWN");
-                        let console_msg = format_log_message(
-                            &packet.entry.timestamp, &packet.entry.hostname, &packet.entry.logger_name, level_str,
-                            &packet.entry.module, &packet.entry.filename, &packet.entry.function_name, &packet.entry.line_number,
-                            &packet.entry.message, &packet.entry.path_name, &packet.entry.process_id, &packet.entry.process_name,
-                            &packet.entry.thread_id, &packet.entry.thread_name, &packet.entry.service_name, &packet.entry.stack_trace,
-                            true,
-                        );
-                        let _ = console_tx.try_send(console_msg);
+                biased;
 
-                        let file_msg = format_log_message(
-                            &packet.entry.timestamp, &packet.entry.hostname, &packet.entry.logger_name, level_str,
-                            &packet.entry.module, &packet.entry.filename, &packet.entry.function_name, &packet.entry.line_number,
-                            &packet.entry.message, &packet.entry.path_name, &packet.entry.process_id, &packet.entry.process_name,
-                            &packet.entry.thread_id, &packet.entry.thread_name, &packet.entry.service_name, &packet.entry.stack_trace,
-                            false,
-                        );
-                        let late_batch = vec![file_msg];
-                        if let Err(e) = sink.write_batch(&late_batch).await {
-                            notify_disk_failure(&ring_buffer, "Failed writing late batch to disk", &e);
-                            return Err(e);
-                        }
-                        if let Err(e) = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await {
-                            notify_disk_failure(&ring_buffer, "Failed file rotation after late batch", &e);
-                            return Err(e);
-                        }
-                        if let Err(e) = sink.flush().await {
-                            notify_disk_failure(&ring_buffer, "Failed flushing late batch to disk", &e);
-                            return Err(e);
-                        }
-                    }
-                }
-
-                // Branch 2: Gap Timeout / Periodic Flush
-                _ = gap_timer.tick() => {
-                    if let Some(&next_available) = buffer.keys().next() {
-                        if next_available > current_sequence {
-                            let gap_text = format!(
-                                "[SEQUENCE_GAP] Missing sequence(s) {}..{} timed out after {}ms; advancing sequence",
-                                current_sequence, next_available, config.gap_timeout_ms
+                // Branch 1: Incoming structured packets in strict MPSC FIFO order
+                maybe_packet = rx.recv() => {
+                    match maybe_packet {
+                        Some(first_packet) => {
+                            Self::_stage_packet(
+                                first_packet,
+                                &mut current_sequence,
+                                &console_tx,
+                                &mut pending_batch,
+                                &mut pending_entries,
                             );
-                            let gap_entry = LogEntry {
-                                timestamp: get_utc_timestamp(),
-                                hostname: get_hostname().to_string(),
-                                logger_name: "log_writer".to_string(),
-                                level: 9, // WARNING
-                                module: "log-server".to_string(),
-                                filename: "log_writer.rs".to_string(),
-                                function_name: "writer_task".to_string(),
-                                line_number: "gap".to_string(),
-                                message: gap_text,
-                                service_name: "log_server".to_string(),
-                                ..Default::default()
-                            };
 
-                            // Broadcast to live gRPC StreamLogs and web clients
-                            ring_buffer.push(gap_entry.clone());
+                            // Drain immediately available burst packets up to batch_size
+                            while pending_batch.len() < batch_size {
+                                match rx.try_recv() {
+                                    Ok(next_packet) => {
+                                        Self::_stage_packet(
+                                            next_packet,
+                                            &mut current_sequence,
+                                            &console_tx,
+                                            &mut pending_batch,
+                                            &mut pending_entries,
+                                        );
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
 
-                            let console_msg = format_log_message(
-                                &gap_entry.timestamp, &gap_entry.hostname, &gap_entry.logger_name, "WARNING",
-                                &gap_entry.module, &gap_entry.filename, &gap_entry.function_name, &gap_entry.line_number,
-                                &gap_entry.message, &gap_entry.path_name, &gap_entry.process_id, &gap_entry.process_name,
-                                &gap_entry.thread_id, &gap_entry.thread_name, &gap_entry.service_name, &gap_entry.stack_trace,
-                                true,
-                            );
-                            let _ = console_tx.try_send(console_msg);
+                            let drained_count = pending_batch.len();
+                            Self::_flush_pending_batch(
+                                &mut sink,
+                                &mut pending_batch,
+                                &mut pending_entries,
+                                &config,
+                                &ring_buffer,
+                            )
+                            .await?;
 
-                            let file_msg = format_log_message(
-                                &gap_entry.timestamp, &gap_entry.hostname, &gap_entry.logger_name, "WARNING",
-                                &gap_entry.module, &gap_entry.filename, &gap_entry.function_name, &gap_entry.line_number,
-                                &gap_entry.message, &gap_entry.path_name, &gap_entry.process_id, &gap_entry.process_name,
-                                &gap_entry.thread_id, &gap_entry.thread_name, &gap_entry.service_name, &gap_entry.stack_trace,
-                                false,
-                            );
-                            let gap_batch = vec![file_msg];
-                            if let Err(e) = sink.write_batch(&gap_batch).await {
-                                notify_disk_failure(&ring_buffer, "Failed writing gap batch to disk", &e);
-                                return Err(e);
+                            // Dynamically scale batch size based on burst saturation
+                            if drained_count >= batch_size {
+                                batch_size = (batch_size * 2).min(1000);
+                            } else if drained_count < batch_size / 2 {
+                                let min_batch = config.initial_batch_size.clamp(1, 10);
+                                batch_size = (batch_size / 2).max(min_batch);
                             }
-                            if let Err(e) = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await {
-                                notify_disk_failure(&ring_buffer, "Failed file rotation after gap batch", &e);
-                                return Err(e);
-                            }
-                            if let Err(e) = sink.flush().await {
-                                notify_disk_failure(&ring_buffer, "Failed flushing gap batch to disk", &e);
-                                return Err(e);
-                            }
-                            current_sequence = next_available;
                         }
+                        None => break,
                     }
                 }
 
-                // Shutdown condition
-                else => break,
-            }
-
-            // Process buffer if current_sequence is ready or buffer is too full
-            while buffer.contains_key(&current_sequence) || buffer.len() >= batch_size {
-                let mut batch = Vec::new();
-
-                // If we hit batch_size but don't have current_sequence, we force progress
-                if !buffer.contains_key(&current_sequence) && buffer.len() >= batch_size {
-                    let next_available = *buffer.keys().next().unwrap();
-                    if next_available > current_sequence {
-                        let pressure_text = format!(
-                            "[BUFFER_PRESSURE] Reorder queue saturated (>{} packets); forcing progress to {} (dropping gaps)",
-                            batch_size, next_available
-                        );
-                        let pressure_entry = LogEntry {
-                            timestamp: get_utc_timestamp(),
-                            hostname: get_hostname().to_string(),
-                            logger_name: "log_writer".to_string(),
-                            level: 10, // ERROR
-                            module: "log-server".to_string(),
-                            filename: "log_writer.rs".to_string(),
-                            function_name: "writer_task".to_string(),
-                            line_number: "buffer".to_string(),
-                            message: pressure_text,
-                            service_name: "log_server".to_string(),
-                            ..Default::default()
-                        };
-
-                        // Broadcast to live gRPC StreamLogs and web clients
-                        ring_buffer.push(pressure_entry.clone());
-
-                        let console_msg = format_log_message(
-                            &pressure_entry.timestamp, &pressure_entry.hostname, &pressure_entry.logger_name, "ERROR",
-                            &pressure_entry.module, &pressure_entry.filename, &pressure_entry.function_name, &pressure_entry.line_number,
-                            &pressure_entry.message, &pressure_entry.path_name, &pressure_entry.process_id, &pressure_entry.process_name,
-                            &pressure_entry.thread_id, &pressure_entry.thread_name, &pressure_entry.service_name, &pressure_entry.stack_trace,
-                            true,
-                        );
-                        let _ = console_tx.try_send(console_msg);
-
-                        let file_msg = format_log_message(
-                            &pressure_entry.timestamp, &pressure_entry.hostname, &pressure_entry.logger_name, "ERROR",
-                            &pressure_entry.module, &pressure_entry.filename, &pressure_entry.function_name, &pressure_entry.line_number,
-                            &pressure_entry.message, &pressure_entry.path_name, &pressure_entry.process_id, &pressure_entry.process_name,
-                            &pressure_entry.thread_id, &pressure_entry.thread_name, &pressure_entry.service_name, &pressure_entry.stack_trace,
-                            false,
-                        );
-                        batch.push(file_msg);
-                        current_sequence = next_available;
+                // Branch 2: Periodic flush timer
+                _ = flush_timer.tick() => {
+                    if !pending_batch.is_empty() {
+                        Self::_flush_pending_batch(
+                            &mut sink,
+                            &mut pending_batch,
+                            &mut pending_entries,
+                            &config,
+                            &ring_buffer,
+                        )
+                        .await?;
                     }
                 }
-
-                while let Some(entry) = buffer.remove(&current_sequence) {
-                    let level_str = crate::models::log_entry::LEVEL_STRINGS.get(entry.level as usize).unwrap_or(&"UNKNOWN");
-
-                    // Format for console (queued for async print)
-                    let console_msg = format_log_message(
-                        &entry.timestamp, &entry.hostname, &entry.logger_name, level_str,
-                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
-                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
-                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
-                        true,
-                    );
-                    let _ = console_tx.try_send(console_msg);
-
-                    // Format for file (no colors)
-                    let file_msg = format_log_message(
-                        &entry.timestamp, &entry.hostname, &entry.logger_name, level_str,
-                        &entry.module, &entry.filename, &entry.function_name, &entry.line_number,
-                        &entry.message, &entry.path_name, &entry.process_id, &entry.process_name,
-                        &entry.thread_id, &entry.thread_name, &entry.service_name, &entry.stack_trace,
-                        false,
-                    );
-
-                    batch.push(file_msg);
-                    current_sequence += 1;
-
-                    if batch.len() >= batch_size {
-                        break;
-                    }
-                }
-
-                if !batch.is_empty() {
-                    if let Err(e) = sink.write_batch(&batch).await {
-                        notify_disk_failure(&ring_buffer, "Failed writing batch to disk after exhausting retries", &e);
-                        return Err(e);
-                    }
-                    if let Err(e) = sink.check_and_rotate(config.max_file_bytes, config.backup_count).await {
-                        notify_disk_failure(&ring_buffer, "Failed file rotation after batch write", &e);
-                        return Err(e);
-                    }
-                    if let Err(e) = sink.flush().await {
-                        notify_disk_failure(&ring_buffer, "Failed flushing batch to disk", &e);
-                        return Err(e);
-                    }
-                }
-
-                if buffer.is_empty() {
-                    break;
-                }
-            }
-
-            // Adjust batch size dynamically with configured lower bound
-            if buffer.len() > batch_size {
-                batch_size = (batch_size * 2).min(1000);
-            } else if buffer.len() < batch_size / 2 {
-                let min_batch = config.initial_batch_size.clamp(1, 10);
-                batch_size = (batch_size / 2).max(min_batch);
             }
         }
 
-        // Flush remaining messages on exit
-        let mut exit_batch = Vec::new();
-        for (_, entry) in buffer {
-            let level_str = crate::models::log_entry::LEVEL_STRINGS.get(entry.level as usize).unwrap_or(&"UNKNOWN");
-            let file_msg = format_log_message(
-                &entry.timestamp, 
-                &entry.hostname, 
-                &entry.logger_name, level_str,
-                &entry.module, 
-                &entry.filename, 
-                &entry.function_name, 
-                &entry.line_number,
-                &entry.message, 
-                &entry.path_name, 
-                &entry.process_id, 
-                &entry.process_name,
-                &entry.thread_id, 
-                &entry.thread_name, 
-                &entry.service_name, 
-                &entry.stack_trace,
-                false,
-            );
-            exit_batch.push(file_msg);
-        }
-        if !exit_batch.is_empty() {
-            if let Err(e) = sink.write_batch(&exit_batch).await {
-                notify_disk_failure(&ring_buffer, "Failed writing final exit batch to disk", &e);
-                return Err(e);
-            }
+        // Flush any remaining messages on clean shutdown
+        if !pending_batch.is_empty() {
+            Self::_flush_pending_batch(
+                &mut sink,
+                &mut pending_batch,
+                &mut pending_entries,
+                &config,
+                &ring_buffer,
+            )
+            .await?;
         }
 
         if let Err(e) = sink.flush().await {
@@ -415,16 +264,109 @@ impl LogWriter {
         Ok(())
     }
 
-    // -----------------------------------------------------------------------------
+    //-----------------------------------------------------------------------------------------------
 
+    /// Assigns monotonic sequence ID, dispatches console formatting, and stages file batch entry
+    fn _stage_packet(
+        mut packet: LogPacket,
+        current_sequence: &mut u64,
+        console_tx: &mpsc::Sender<String>,
+        pending_batch: &mut Vec<String>,
+        pending_entries: &mut Vec<LogEntry>,
+    ) {
+        packet.sequence = *current_sequence;
+        *current_sequence += 1;
 
-    /// Rotate log files (delegates to TransactionalFileWriter)
-    pub async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
-        TransactionalFileWriter::rotate_files(base_path, backup_count).await
+        let entry = packet.entry;
+        let level_str = crate::models::log_entry::LEVEL_STRINGS
+            .get(entry.level as usize)
+            .unwrap_or(&"UNKNOWN");
+
+        let console_msg = format_log_message(
+            &entry.timestamp,
+            &entry.hostname,
+            &entry.logger_name,
+            level_str,
+            &entry.module,
+            &entry.filename,
+            &entry.function_name,
+            &entry.line_number,
+            &entry.message,
+            &entry.path_name,
+            &entry.process_id,
+            &entry.process_name,
+            &entry.thread_id,
+            &entry.thread_name,
+            &entry.service_name,
+            &entry.stack_trace,
+            true,
+        );
+        let _ = console_tx.try_send(console_msg);
+
+        let file_msg = format_log_message(
+            &entry.timestamp,
+            &entry.hostname,
+            &entry.logger_name,
+            level_str,
+            &entry.module,
+            &entry.filename,
+            &entry.function_name,
+            &entry.line_number,
+            &entry.message,
+            &entry.path_name,
+            &entry.process_id,
+            &entry.process_name,
+            &entry.thread_id,
+            &entry.thread_name,
+            &entry.service_name,
+            &entry.stack_trace,
+            false,
+        );
+
+        pending_batch.push(file_msg);
+        pending_entries.push(entry);
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Writes pending batch to disk, performs rotation check, flushes, and publishes to ring buffer
+    async fn _flush_pending_batch(
+        sink: &mut TransactionalFileWriter,
+        pending_batch: &mut Vec<String>,
+        pending_entries: &mut Vec<LogEntry>,
+        config: &WriterConfig,
+        ring_buffer: &crate::core::ring_buffer::LogRingBuffer,
+    ) -> tokio::io::Result<()> {
+        if let Err(e) = sink.write_batch(pending_batch).await {
+            notify_disk_failure(
+                ring_buffer,
+                "Failed writing batch to disk after exhausting retries",
+                &e,
+            );
+            return Err(e);
+        }
+        if let Err(e) = sink
+            .check_and_rotate(config.max_file_bytes, config.backup_count)
+            .await
+        {
+            notify_disk_failure(ring_buffer, "Failed file rotation after batch write", &e);
+            return Err(e);
+        }
+        if let Err(e) = sink.flush().await {
+            notify_disk_failure(ring_buffer, "Failed flushing batch to disk", &e);
+            return Err(e);
+        }
+
+        pending_batch.clear();
+        for entry in pending_entries.drain(..) {
+            ring_buffer.push(entry);
+        }
+
+        Ok(())
     }
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 /// Broadcast and record a fatal unrecoverable disk failure
 fn notify_disk_failure(
@@ -450,7 +392,7 @@ fn notify_disk_failure(
     eprintln!("{err_msg}");
 }
 
-// -----------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

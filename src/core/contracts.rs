@@ -49,7 +49,7 @@ pub fn build_exchange_contracts_value(config: &Config, ring_capacity: usize) -> 
         "   - Frame #1 (Unpacked Cap'n Proto HelloMsg):",
         "     struct HelloMsg { fromName @0 :Text; fromHost @1 :Text; fromAddress @2 :Text; toAddress @3 :Text; fromPublicIP @4 :Text; }",
         "   - Subsequent Frames (Packed Cap'n Proto LoggerMsg):",
-        "     Deserialized via capnp::serialize_packed -> sequenced by AtomicU64 -> LogWriter BTreeMap reorder buffer -> disk & LogRingBuffer.",
+        "     Deserialized via capnp::serialize_packed -> enqueued to MPSC channel -> single-authority FIFO LogWriter batch persistence -> disk & LogRingBuffer.",
     ]
     .join("\n");
 

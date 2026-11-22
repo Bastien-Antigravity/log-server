@@ -34,7 +34,7 @@ graph TD
     subgraph "Core Components"
         PH["⚙️ protocol_handlers.rs<br/>(Validation & Handshakes)"]
         LF["🎨 log_formatter.rs<br/>(ANSI & Logfmt Formatting)"]
-        BT["🗂️ BTreeMap Buffer<br/>(Out-of-order Sequencing)"]
+        BT["🗂️ Single-Authority FIFO Batcher<br/>(Burst Draining & Sequence Assignment)"]
         RB["🔄 LogRingBuffer (5,000 slots)<br/>(In-Memory FIFO & Filtered Tail)"]
         BC["📡 Tokio Broadcast Channel<br/>(Lock-free Live Dispatch)"]
     end
@@ -52,12 +52,12 @@ graph TD
     TCP -->|Raw Data| PH
     GRPC_IN -->|gRPC Request| PH
     PH -->|LogPacket| LS
-    LS -->|MPSC Channel| LW
-    LW -->|Sorts In| BT
-    LW -->|Push Entry| RB
-    RB -->|Broadcast| BC
+    LS -->|MPSC FIFO Channel| LW
+    LW -->|Stages & Sequences| BT
     BT -->|Format| LF
-    LF -->|Atomic Flush| FS
+    LF -->|Atomic Batch Flush| FS
+    LW -->|Commit Ordered Batch| RB
+    RB -->|Broadcast| BC
 
     BC -->|Real-Time Push| GRPC_OUT
     RB -->|Tail Query| GRPC_OUT
@@ -67,21 +67,21 @@ graph TD
 
 *   **Ingestion Layers**: Safe, isolated network tasks running on Tokio green threads.
 *   **Facade Layers**: High-level managers implementing safe resource management and simple bootstrap boundaries.
-*   **Core Logic**: Functional, zero-allocation algorithms for data transformation and sequence correction.
+*   **Core Logic**: Functional, zero-allocation algorithms for data transformation and single-authority FIFO batch persistence.
 
 ---
 
 ## ⚡ 2. The Ingest Pipeline & Threading Mechanics
 
-To ensure absolute chronological logging under heavy network jitter, the `log-server` decouples networking threads from disk I/O using a thread-safe **MPSC (Multi-Producer, Single-Consumer) queue**:
+To ensure deterministic FIFO logging without pre-channel task-yield ordering races, the `log-server` decouples networking threads from disk I/O using a thread-safe **MPSC (Multi-Producer, Single-Consumer) queue** where `LogWriter` acts as the single sequence and persistence authority:
 
 ```
 [TCP Client 1]  ---\
-[TCP Client 2]  ------>  [ MPSC Queue (Capacity: 2048) ]  -->  [ LogWriter (Single Async Task) ]
+[TCP Client 2]  ------>  [ MPSC Queue (Capacity: 2048) ]  -->  [ LogWriter (Single-Authority FIFO Task) ]
 [gRPC Client 3] ---/                                                  |
-                                                                      +---> [ BTreeMap Buffer ] ---> [ logs/_main.log ]
+                                                                      +---> [ Transactional Batch Write ] ---> [ logs/_main.log ]
                                                                       |
-                                                                      +---> [ LogRingBuffer (5000) ]
+                                                                      +---> [ LogRingBuffer (5000) ] (Identical Persistence Order)
                                                                                   |
                                                                                   v (Broadcast Channel)
                                                                             [ gRPC StreamLogs :9021 ]
@@ -95,13 +95,12 @@ To ensure absolute chronological logging under heavy network jitter, the `log-se
 
 1.  **Network Handlers (Producers)**:
     *   Each raw TCP connection is allocated a separate Tokio task spawning a `SafeSocket` framer.
-    *   It performs the **Mandatory Handshake (`HelloMsg`)**, validates packet size, deserializes the Cap'n Proto payload, and increments the thread-safe global `AtomicU64` sequence counter.
-    *   It packages the log into a `LogPacket` and sends it down the `mpsc::Sender` channel.
-2.  **LogWriter (Consumer)**:
-    *   A single background worker `writer_task` owns the `mpsc::Receiver`.
-    *   It processes incoming packets sequentially, inserting them into an in-memory `BTreeMap` sorted by sequence ID.
-    *   It simultaneously pushes entries into `LogRingBuffer`, broadcasting them immediately to any active `StreamLogs` gRPC streams with zero disk latency.
-    *   It flushes logs in dynamic batches to disk once sequence numbers align, ensuring perfect chronological order in the physical file.
+    *   It performs the **Mandatory Handshake (`HelloMsg`)**, validates packet size, and deserializes the Cap'n Proto payload.
+    *   It packages the log into a `LogPacket` and sends it down the `mpsc::Sender` FIFO channel.
+2.  **LogWriter (Single-Authority Consumer)**:
+    *   A single background worker `writer_task` owns the `mpsc::Receiver` and the authoritative monotonic `current_sequence: u64`.
+    *   Upon receiving a packet from `rx.recv()`, it drains any immediately available burst packets via `rx.try_recv()` up to `batch_size`.
+    *   It flushes the batch transactionally to `_main.log` in a single contiguous syscall, checks for size-based rotation, and then commits the entries into `LogRingBuffer` in exact persistence order, broadcasting them immediately to active `StreamLogs` gRPC subscribers.
 3.  **Real-Time Streaming Egress**:
     *   `web-interface` connects as a gRPC client to `log-server:9021` invoking `StreamLogs`.
     *   The browser opens an EventSource connection to `/api/v1/system/logs/stream`.

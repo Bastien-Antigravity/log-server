@@ -69,16 +69,9 @@ mindmap
 *   **Tokio Broadcast**: An asynchronous `broadcast::Sender<LogEntry>` (4,096 capacity) broadcasts every received log immediately upon ingestion.
 *   **Zero-Polling Pipeline**: When `web-interface` connects via `StreamLogs`, logs are pushed down an active HTTP/2 stream with sub-millisecond latency and forwarded to the browser via Server-Sent Events (`/api/v1/system/logs/stream`).
 
-### 4. Chronological Sequence Re-ordering (Zero-Drift)
-*   Network latency and parallel threads often cause logs to arrive out of order. The server resolves this dynamically using an in-memory **`BTreeMap` buffer**:
-    1.  Logs are assigned an incremental `u64` sequence number upon ingestion.
-    2.  Logs are stored in a sorted `BTreeMap` key-value buffer.
-    3.  A dedicated writer task flushes logs in ordered batches only when the next expected sequence number (`current_sequence`) matches the lowest key in the buffer.
-
-### 5. Gap Recovery & Liveness (ADR-001)
-*   **The Problem**: If a network connection drops or packet corruption occurs, a sequence number might be lost forever, causing the `BTreeMap` to stall indefinitely (stuck waiting for the missing ID).
-*   **The Recovery (500ms Gap Timer)**:
-    *   If the next expected sequence number is missing but newer logs are in the buffer, a **500ms gap timer** begins ticking.
-    *   If the gap does not resolve within `500ms`, the server skips the missing index, logs a `[SEQUENCE_GAP]` entry to console and file indicating a skipped sequence, updates `current_sequence` to the next available ID, and flushes subsequent logs.
-*   **Buffer Pressure (Force Progress)**:
-    *   If the in-memory buffer exceeds its maximum capacity limit (`config.buffer_size` - default `2048`), the server triggers **Force Progress**: it immediately jumps execution to the lowest available sequence number in memory, outputs a `[BUFFER_PRESSURE]` entry, and flushes all buffered logs to prevent memory leaks.
+### 4. Single-Authority FIFO Sequencing & Burst Batching
+*   To eliminate artificial sequence gaps caused by Tokio task yields between atomic increment and channel enqueue, `LogWriter::writer_task` is the **single serialization and sequence authority**:
+    1.  Producers enqueue `LogPacket` messages directly into the MPSC FIFO channel.
+    2.  `writer_task` assigns monotonic `u64` sequence numbers in strict channel dequeue order.
+    3.  Burst packets immediately available in the channel are drained via `rx.try_recv()` up to `batch_size`, written transactionally to `_main.log`, and committed to `LogRingBuffer` in exact persistence order.
+    4.  When all producer channels close (`rx.recv()` returns `None`), `writer_task` drains and flushes any remaining batch and exits cleanly.

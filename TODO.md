@@ -26,11 +26,8 @@ tags:
 
 ### 🔴 High
 
-- [ ] **Global sequence ordering mixes independent ingestion sources**: `sequence_counter` is shared by TCP, gRPC, and internal logger packets.
-  - This is an ordering-integrity concern, not a delivery-availability concern. The intended contract is best-effort chronological ordering, with gap recovery and overflow protection.
-  - Document that global monotonic ordering is not a strict cross-source transaction guarantee.
-  - Review whether the reorder buffer should be source-aware or whether sequence numbers should remain explicitly local to a single ingestion stream.
-  - **Affected areas**: `src/servers/tcp_server.rs`, `src/servers/grpc_server.rs`, `src/utils/terminal_ui.rs`, `src/facade/log_writer.rs`.
+- [x] **Global sequence ordering mixes independent ingestion sources**: Simplified to Single-Authority FIFO Sequencing inside `LogWriter::writer_task`, eliminating pre-channel `AtomicU64` race conditions, `BTreeMap` reorder stalls, synthetic `[SEQUENCE_GAP]` / `[BUFFER_PRESSURE]` timeouts, and fixing the `tokio::select!` shutdown hang when all `writer_tx` senders are dropped.
+  - **Affected areas**: `src/servers/tcp_server.rs`, `src/servers/grpc_server.rs`, `src/utils/terminal_ui.rs`, `src/facade/log_writer.rs`, `src/core/protocol_handlers.rs`.
 
 - [ ] **Implement explicit graceful shutdown**: Supervise and stop TCP, gRPC, writer, heartbeat, and OpenMFE tasks together so final buffered logs are drained and sockets/tasks are released.
   - **Affected area**: `src/facade/log_server.rs`.
@@ -61,7 +58,7 @@ tags:
 - [ ] **Remove silent wildcard-host fallbacks**: Avoid rewriting `0.0.0.0`, `::`, or empty hosts to `127.0.0.1` for contracts and published addresses; distinguish bind addresses from advertised/display addresses.
   - **Affected area**: `src/core/contracts.rs`.
 
-- [ ] **Preserve ring-stream ordering semantics**: Separate ingestion state from ordered disk state or ensure the ring buffer and gRPC stream expose a consistently defined ordering contract.
+- [x] **Preserve ring-stream ordering semantics**: `LogWriter::writer_task` now publishes committed entries to `LogRingBuffer` immediately after transactional disk persistence in exact FIFO batch order, guaranteeing identical ordering between `_main.log` and `LogRingBuffer`.
   - **Affected areas**: `src/facade/log_writer.rs`, `src/core/ring_buffer.rs`, `src/servers/grpc_server.rs`.
 
 - [ ] **Make ring-buffer locking and broadcast behavior explicit**: Remove or handle poisoned-lock silent skips and document/cohesively handle broadcast lag without inconsistent storage behavior.
