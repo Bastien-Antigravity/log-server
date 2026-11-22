@@ -1,4 +1,3 @@
-// cli:allow-print
 //! ESSENTIAL PROCESS:
 //! Asynchronous single-authority FIFO file writer and rotation coordinator. Assigns
 //! monotonic sequence numbers upon channel dequeue, drains bursts into contiguous batches,

@@ -1,4 +1,3 @@
-// cli:allow-print
 //! ESSENTIAL PROCESS:
 //! Terminal UI formatting, ANSI color palettes, and internal log-server self-logging.
 //!
