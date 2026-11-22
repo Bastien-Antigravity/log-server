@@ -88,8 +88,17 @@ impl SafeSocketReader {
 impl SafeSocketWriter {
     /// Send framed data to socket
     pub async fn send_data(&mut self, data: &[u8]) -> io::Result<()> {
-        let len = data.len() as u32;
-        self.writer.write_all(&len.to_be_bytes()).await?;
+        let len = data.len() as u64;
+        if len > MAX_MESSAGE_SIZE as u64 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "outgoing message size {len} exceeds MAX_MESSAGE_SIZE ({MAX_MESSAGE_SIZE})"
+                ),
+            ));
+        }
+        let len_u32 = len as u32;
+        self.writer.write_all(&len_u32.to_be_bytes()).await?;
         self.writer.write_all(data).await?;
         self.writer.flush().await
     }
@@ -137,7 +146,9 @@ mod tests {
         let listener = match TcpListener::bind("127.0.0.1:0").await {
             Ok(l) => l,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                eprintln!("Skipping test_heartbeat_skip: bind PermissionDenied in restricted sandbox");
+                eprintln!(
+                    "Skipping test_heartbeat_skip: bind PermissionDenied in restricted sandbox"
+                );
                 return;
             }
             Err(e) => panic!("bind failed: {e}"),
@@ -162,7 +173,9 @@ mod tests {
         let client_stream = match TcpStream::connect(addr).await {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                eprintln!("Skipping test_heartbeat_skip: connect PermissionDenied in restricted sandbox");
+                eprintln!(
+                    "Skipping test_heartbeat_skip: connect PermissionDenied in restricted sandbox"
+                );
                 return;
             }
             Err(e) => panic!("connect failed: {e}"),
@@ -241,8 +254,46 @@ mod tests {
         let (mut reader, _) = safe_socket.split();
 
         let res = reader.receive_data().await;
-        assert!(res.is_err(), "Mid-message connection drop must return error");
+        assert!(
+            res.is_err(),
+            "Mid-message connection drop must return error"
+        );
         assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+
+        let _ = server_task.await;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_outgoing_oversized_message_rejected() {
+        let listener = match TcpListener::bind("127.0.0.1:0").await {
+            Ok(l) => l,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("bind failed: {e}"),
+        };
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let _ = socket;
+        });
+
+        let client_stream = match TcpStream::connect(addr).await {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("connect failed: {e}"),
+        };
+        let safe_socket = SafeSocket::new(client_stream);
+        let (_, mut writer) = safe_socket.split();
+
+        let oversized_len = MAX_MESSAGE_SIZE + 1;
+        let dummy = [0u8; 8];
+        let huge_ref: &[u8] = unsafe { std::slice::from_raw_parts(dummy.as_ptr(), oversized_len) };
+
+        let res = writer.send_data(huge_ref).await;
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
 
         let _ = server_task.await;
     }

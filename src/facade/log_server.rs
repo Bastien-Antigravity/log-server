@@ -56,14 +56,28 @@ impl LogServer {
         enable_grpc: bool,
         app_config: Option<Arc<AppConfig>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Resolve fsync durability from AppConfig or environment if available
+        if let Some(ref ac) = app_config {
+            let fsync_enabled = crate::config::config::parse_fsync_config(ac);
+            config.set_sync_on_flush(fsync_enabled);
+        } else if let Ok(val) = std::env::var("LS_FSYNC") {
+            let val = val.trim().to_lowercase();
+            let fsync_enabled = val == "true" || val == "1" || val == "yes";
+            config.set_sync_on_flush(fsync_enabled);
+        }
+
         // Create resolved log directory (LOG_DIR -> DOCKER_ENV=true -> <exec_parent>/logs)
         let log_dir = crate::utils::helpers::resolve_log_dir();
         if let Some(log_dir_str) = log_dir.to_str() {
             crate::utils::helpers::create_log_folder(log_dir_str)?;
         }
 
-        // Initialize writer
-        let writer = Arc::new(LogWriter::new().await?);
+        // Initialize writer with matching shared sync_on_flush atomic
+        let writer_config = crate::facade::log_writer::WriterConfig {
+            sync_on_flush: config.sync_on_flush.clone(),
+            ..Default::default()
+        };
+        let writer = Arc::new(LogWriter::with_config(writer_config).await?);
 
         Ok(Self {
             name: config.name.clone(),
@@ -72,6 +86,21 @@ impl LogServer {
             enable_grpc,
             app_config,
         })
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Dynamic runtime control for hardware durability barrier (fsync).
+    pub fn set_sync_on_flush(&self, enabled: bool) {
+        self.config.set_sync_on_flush(enabled);
+        self.writer.set_sync_on_flush(enabled);
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Query active hardware durability barrier (fsync) state.
+    pub fn is_sync_on_flush(&self) -> bool {
+        self.config.is_sync_on_flush()
     }
 
     //-----------------------------------------------------------------------------------------------
@@ -91,7 +120,7 @@ impl LogServer {
         let ring_buffer = Arc::new(LogRingBuffer::new(5000));
 
         // Start a single writer task for all components to share
-        let (writer_tx, writer_handle) = self.writer.start_writer_task(ring_buffer.clone());
+        let (writer_tx, mut writer_handle) = self.writer.start_writer_task(ring_buffer.clone());
 
         // Centralized sequence counter for global ordering
         let sequence_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -108,13 +137,27 @@ impl LogServer {
             "internal logger initialized - writer(s) ready !",
         );
 
+        let fsync_state = if self.is_sync_on_flush() {
+            "enabled (hardware NAND commit)"
+        } else {
+            "disabled (OS page cache)"
+        };
+        print_internal_log(
+            "INFO",
+            &self.name,
+            "log_server.rs",
+            "run",
+            line_str!(),
+            &format!("hardware durability barrier (fsync): {fsync_state}"),
+        );
+
         // Start TCP server (always)
         let tcp_server = TcpServer::new(&self.config);
         let tcp_writer_tx = writer_tx.clone();
         let tcp_sequence_counter = sequence_counter.clone();
         let identity = self.name.clone();
 
-        let tcp_handle = tokio::spawn(async move {
+        let mut tcp_handle = tokio::spawn(async move {
             if let Err(e) = tcp_server.run(tcp_writer_tx, tcp_sequence_counter).await {
                 print_internal_log(
                     "ERROR",
@@ -132,7 +175,7 @@ impl LogServer {
 
         // Conditionally start gRPC bridge gateway with real-time stream support
         let identity_grpc = self.name.clone();
-        let grpc_handle = if self.enable_grpc {
+        let mut grpc_handle = if self.enable_grpc {
             let grpc_server = LogBridgeGateway::new(&self.config);
             let grpc_writer_tx = writer_tx.clone();
             let grpc_sequence_counter = sequence_counter.clone();
@@ -178,7 +221,7 @@ impl LogServer {
 
         // Wait for servers or writer task to complete; abort if any fails
         tokio::select! {
-            res = tcp_handle => {
+            res = &mut tcp_handle => {
                 match res {
                     Ok(Ok(())) => Ok(()),
                     Ok(Err(e)) => Err(e.into()),
@@ -186,7 +229,7 @@ impl LogServer {
                 }
             }
             res = async {
-                if let Some(h) = grpc_handle {
+                if let Some(ref mut h) = grpc_handle {
                     h.await
                 } else {
                     std::future::pending().await
@@ -198,7 +241,7 @@ impl LogServer {
                     Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
                 }
             }
-            res = writer_handle => {
+            res = &mut writer_handle => {
                 match res {
                     Ok(Ok(())) => Ok(()),
                     Ok(Err(e)) => {
@@ -223,6 +266,57 @@ impl LogServer {
                         );
                         Err(Box::new(join_err) as Box<dyn std::error::Error>)
                     }
+                }
+            }
+            _ = async {
+                #[cfg(unix)]
+                {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let mut sigterm = signal(SignalKind::terminate()).ok();
+                    tokio::select! {
+                        _ = tokio::signal::ctrl_c() => {},
+                        _ = async {
+                            if let Some(s) = sigterm.as_mut() {
+                                s.recv().await;
+                            } else {
+                                std::future::pending::<()>().await;
+                            }
+                        } => {},
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = tokio::signal::ctrl_c().await;
+                }
+            } => {
+                print_internal_log(
+                    "INFO",
+                    &self.name,
+                    "log_server.rs",
+                    "run",
+                    line_str!(),
+                    "shutdown signal received; draining buffered logs and terminating gracefully...",
+                );
+                tcp_handle.abort();
+                if let Some(ref h) = grpc_handle {
+                    h.abort();
+                }
+                crate::utils::terminal_ui::clear_internal_logger();
+                drop(writer_tx);
+                match writer_handle.await {
+                    Ok(Ok(())) => {
+                        print_internal_log(
+                            "INFO",
+                            &self.name,
+                            "log_server.rs",
+                            "run",
+                            line_str!(),
+                            "clean shutdown complete: all buffered records flushed to disk.",
+                        );
+                        Ok(())
+                    }
+                    Ok(Err(e)) => Err(Box::new(e) as Box<dyn std::error::Error>),
+                    Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
                 }
             }
         }

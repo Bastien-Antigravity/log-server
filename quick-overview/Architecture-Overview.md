@@ -1,6 +1,6 @@
 ---
 tags:
-- '#ai/ignore'
+- '#ai/ready'
 - '#zone/3-fleet'
 - '#service/log-server'
 - '#type/architecture-overview'
@@ -35,6 +35,7 @@ graph TD
         PH["⚙️ protocol_handlers.rs<br/>(Validation & Handshakes)"]
         LF["🎨 log_formatter.rs<br/>(ANSI & Logfmt Formatting)"]
         BT["🗂️ Single-Authority FIFO Batcher<br/>(Burst Draining & Sequence Assignment)"]
+        TW["🛡️ TransactionalFileWriter<br/>(Staging, Checkpointed Rollback, Rotation)"]
         RB["🔄 LogRingBuffer (5,000 slots)<br/>(In-Memory FIFO & Filtered Tail)"]
         BC["📡 Tokio Broadcast Channel<br/>(Lock-free Live Dispatch)"]
     end
@@ -55,7 +56,8 @@ graph TD
     LS -->|MPSC FIFO Channel| LW
     LW -->|Stages & Sequences| BT
     BT -->|Format| LF
-    LF -->|Atomic Batch Flush| FS
+    LF -->|Transactional Batch| TW
+    TW -->|Checkpointed Flush| FS
     LW -->|Commit Ordered Batch| RB
     RB -->|Broadcast| BC
 
@@ -65,9 +67,9 @@ graph TD
     WI -->|Server-Sent Events| UI
 ```
 
-*   **Ingestion Layers**: Safe, isolated network tasks running on Tokio green threads.
-*   **Facade Layers**: High-level managers implementing safe resource management and simple bootstrap boundaries.
-*   **Core Logic**: Functional, zero-allocation algorithms for data transformation and single-authority FIFO batch persistence.
+* **Ingestion Layers**: Safe, isolated network tasks running on Tokio green threads.
+* **Facade Layers**: High-level managers implementing safe resource management and lifecycle monitoring.
+* **Core Logic**: Functional, zero-allocation algorithms for data transformation, single-authority FIFO sequencing, and transactional persistence.
 
 ---
 
@@ -79,7 +81,7 @@ To ensure deterministic FIFO logging without pre-channel task-yield ordering rac
 [TCP Client 1]  ---\
 [TCP Client 2]  ------>  [ MPSC Queue (Capacity: 2048) ]  -->  [ LogWriter (Single-Authority FIFO Task) ]
 [gRPC Client 3] ---/                                                  |
-                                                                      +---> [ Transactional Batch Write ] ---> [ logs/_main.log ]
+                                                                      +---> [ TransactionalFileWriter ] ---> [ logs/_main.log ]
                                                                       |
                                                                       +---> [ LogRingBuffer (5000) ] (Identical Persistence Order)
                                                                                   |
@@ -93,23 +95,25 @@ To ensure deterministic FIFO logging without pre-channel task-yield ordering rac
                                                                             [ Browser UI Console ]
 ```
 
-1.  **Network Handlers (Producers)**:
-    *   Each raw TCP connection is allocated a separate Tokio task spawning a `SafeSocket` framer.
-    *   It performs the **Mandatory Handshake (`HelloMsg`)**, validates packet size, and deserializes the Cap'n Proto payload.
-    *   It packages the log into a `LogPacket` and sends it down the `mpsc::Sender` FIFO channel.
-2.  **LogWriter (Single-Authority Consumer)**:
-    *   A single background worker `writer_task` owns the `mpsc::Receiver` and the authoritative monotonic `current_sequence: u64`.
-    *   Upon receiving a packet from `rx.recv()`, it drains any immediately available burst packets via `rx.try_recv()` up to `batch_size`.
-    *   It flushes the batch transactionally to `_main.log` in a single contiguous syscall, checks for size-based rotation, and then commits the entries into `LogRingBuffer` in exact persistence order, broadcasting them immediately to active `StreamLogs` gRPC subscribers.
-3.  **Real-Time Streaming Egress**:
-    *   `web-interface` connects as a gRPC client to `log-server:9021` invoking `StreamLogs`.
-    *   The browser opens an EventSource connection to `/api/v1/system/logs/stream`.
-    *   Incoming log events are pushed down the pipe in sub-millisecond real time.
+1. **Network Handlers (Producers)**:
+   * Each raw TCP connection is allocated a separate Tokio task spawning a `SafeSocket` framer.
+   * It performs the **Mandatory Handshake (`HelloMsg`)**, validates packet size, and deserializes the Cap'n Proto payload.
+   * It packages the log into a `LogPacket` and sends it down the `mpsc::Sender` FIFO channel.
+2. **LogWriter (Single-Authority Consumer)**:
+   * A single background worker `writer_task` owns the `mpsc::Receiver` and the authoritative monotonic `current_sequence: u64`.
+   * Upon receiving a packet from `rx.recv()`, it drains any immediately available burst packets via `rx.try_recv()` up to `batch_size`.
+   * It flushes the batch transactionally to `_main.log` via `TransactionalFileWriter` with checkpointed `ftruncate` rollback, checks for size-based rotation, and then commits the entries into `LogRingBuffer` in exact persistence order.
+3. **Real-Time Streaming Egress**:
+   * `web-interface` connects as a gRPC client to `log-server:9021` invoking `StreamLogs`.
+   * The browser opens an EventSource connection to `/api/v1/system/logs/stream`.
+   * Incoming log events are pushed down the pipe in sub-millisecond real time.
 
 ---
 
 ## 🛡️ 3. Safety Controls
 
-*   **Slow-Loris Guard**: The TCP server enforces a strict **5-second timeout** on incoming handshakes. Non-compliant connections are instantly severed to prevent exhaustion.
-*   **Dynamic Backpressure**: If the MPSC buffer hits 2048 messages (e.g., due to disk I/O bottlenecks), network producers yield asynchronously to preserve memory safety.
-*   **Decoupled Failure Domains**: An ingestion crash on a single gRPC or TCP socket never halts the file writing engine or blocks other clients.
+* **Slow-Loris Guard**: The TCP server enforces a strict **5-second timeout** on incoming handshakes. Non-compliant connections are instantly severed to prevent exhaustion.
+* **Dynamic Backpressure**: If the MPSC buffer hits 2048 messages (e.g., due to disk I/O bottlenecks), network producers yield asynchronously to preserve memory safety.
+* **Transactional Disk Integrity**: Checkpointed `ftruncate` rollback drops corrupt partial write records if write syscalls fail.
+* **Fail-Fast Fleet Supervision**: When disk writes exhaust retries, `writer_task` records `[DISK_FAILURE]` `CRITICAL` (level 11) in `LogRingBuffer` and aborts the server with exit code 1. `watchdog-agent` intercepts the crash and activates its crash loop circuit breaker.
+* **Decoupled Failure Domains**: An ingestion crash on a single gRPC or TCP socket never halts the file writing engine or blocks other clients.

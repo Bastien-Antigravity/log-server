@@ -75,13 +75,15 @@ fn main() {
         "Log Bridge enabled",
     );
 
+    let fsync_enabled = log_server::config::config::parse_fsync_config(&ac);
     let config = Config::new(
         &identity,
         &endpoints.tcp.host,
         endpoints.tcp.port,
         endpoints.grpc.port,
     )
-    .with_grpc_host(&endpoints.grpc.host);
+    .with_grpc_host(&endpoints.grpc.host)
+    .with_sync_on_flush(fsync_enabled);
     if let Err(e) = run_server(config, Arc::new(ac), enable_grpc) {
         print_internal_log(
             "ERROR",
@@ -162,10 +164,8 @@ fn parse_host_port(addr: &str) -> Result<Endpoint, String> {
 fn resolve_config_profile() -> String {
     if let Ok(profile) = std::env::var("CONFIG_PROFILE") {
         let trimmed = profile.trim();
-        if !trimmed.is_empty() {
-            if config_file_exists(&format!("{trimmed}.yaml")) {
-                return trimmed.to_string();
-            }
+        if !trimmed.is_empty() && config_file_exists(&format!("{trimmed}.yaml")) {
+            return trimmed.to_string();
         }
     }
 

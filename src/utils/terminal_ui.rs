@@ -11,23 +11,47 @@
 //! - INTERNAL_COUNTER: OnceLock atomic handle retained for signature compatibility.
 
 use chrono::Utc;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 
 use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, truncate};
 
-static INTERNAL_SENDER: OnceLock<mpsc::Sender<LogPacket>> = OnceLock::new();
-static INTERNAL_COUNTER: OnceLock<Arc<AtomicU64>> = OnceLock::new();
+static INTERNAL_SENDER: RwLock<Option<mpsc::Sender<LogPacket>>> = RwLock::new(None);
+static INTERNAL_COUNTER: RwLock<Option<Arc<AtomicU64>>> = RwLock::new(None);
+static DROPPED_INTERNAL_LOGS: AtomicU64 = AtomicU64::new(0);
 
 //-----------------------------------------------------------------------------------------------
 
 /// Initialize the internal logger with a sender and counter
 pub fn set_internal_logger(sender: mpsc::Sender<LogPacket>, counter: Arc<AtomicU64>) {
-    let _ = INTERNAL_SENDER.set(sender);
-    let _ = INTERNAL_COUNTER.set(counter);
+    if let Ok(mut lock) = INTERNAL_SENDER.write() {
+        *lock = Some(sender);
+    }
+    if let Ok(mut lock) = INTERNAL_COUNTER.write() {
+        *lock = Some(counter);
+    }
+}
+
+//-----------------------------------------------------------------------------------------------
+
+/// Clear the internal logger during graceful shutdown to drop the writer channel sender
+pub fn clear_internal_logger() {
+    if let Ok(mut lock) = INTERNAL_SENDER.write() {
+        *lock = None;
+    }
+    if let Ok(mut lock) = INTERNAL_COUNTER.write() {
+        *lock = None;
+    }
+}
+
+//-----------------------------------------------------------------------------------------------
+
+/// Returns total count of internal log messages dropped due to channel saturation
+pub fn get_dropped_internal_logs() -> u64 {
+    DROPPED_INTERNAL_LOGS.load(Ordering::Relaxed)
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -66,8 +90,10 @@ pub fn print_internal_log(
 ) {
     let timestamp = Utc::now().format("%Y-%m-%dT%H:%M:%S%.9fZ").to_string();
 
+    let sender_opt = INTERNAL_SENDER.read().ok().and_then(|lock| lock.clone());
+
     // 1. Direct console output with functional coloring (only before writer is active)
-    if INTERNAL_SENDER.get().is_none() {
+    if sender_opt.is_none() {
         let level_colored = colorize_level(level);
         println!(
             "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {} [metadata: mod=log-server]",
@@ -83,9 +109,7 @@ pub fn print_internal_log(
     }
 
     // 2. Map to internal LogEntry and queue for file write (sequenced authoritatively by LogWriter)
-    if let Some(sender) = INTERNAL_SENDER.get() {
-        let sender = sender.clone();
-
+    if let Some(sender) = sender_opt {
         let entry = LogEntry {
             timestamp,
             hostname: get_hostname().to_string(),
@@ -117,10 +141,14 @@ pub fn print_internal_log(
             sequence: 0,
             entry,
         };
-        if let Err(tokio::sync::mpsc::error::TrySendError::Full(packet)) = sender.try_send(packet) {
-            tokio::spawn(async move {
-                let _ = sender.send(packet).await;
-            });
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = sender.try_send(packet) {
+            let dropped = DROPPED_INTERNAL_LOGS.fetch_add(1, Ordering::Relaxed) + 1;
+            if dropped == 1 || dropped.is_multiple_of(500) {
+                eprintln!(
+                    "[INTERNAL_LOGGER_PRESSURE] Internal logger channel saturated; dropped {} internal log records to prevent memory exhaustion",
+                    dropped
+                );
+            }
         }
     }
 }

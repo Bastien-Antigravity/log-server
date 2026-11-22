@@ -1,4 +1,3 @@
-// cli:allow-print
 //! ESSENTIAL PROCESS:
 //! Transactional disk persistence engine with in-memory batch staging (Tier 1),
 //! checkpointed ftruncate rollback on partial write errors (Tier 2),
@@ -14,8 +13,11 @@
 //! KEY PARAMETERS:
 //! - max_retries: Number of retry attempts on transient write failures.
 //! - retry_delay_ms: Backoff duration between retries in milliseconds.
+//! - sync_on_flush: Dynamic atomic hardware durability barrier (fsync).
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::fs::{self, File, OpenOptions};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt, SeekFrom};
@@ -28,16 +30,35 @@ pub struct TransactionalFileWriter {
     file_size: u64,
     max_retries: usize,
     retry_delay_ms: u64,
+    sync_on_flush: Arc<AtomicBool>,
 }
 
 // -----------------------------------------------------------------------------
 
 impl TransactionalFileWriter {
-    /// Initialize a new transactional file writer for the given base path
+    /// Initialize a new transactional file writer for the given base path with default OS page-cache flush
     pub async fn new(
         base_file_path: PathBuf,
         max_retries: usize,
         retry_delay_ms: u64,
+    ) -> tokio::io::Result<Self> {
+        Self::with_sync(
+            base_file_path,
+            max_retries,
+            retry_delay_ms,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+    }
+
+    // -----------------------------------------------------------------------------
+
+    /// Initialize a transactional file writer with a shared hardware durability barrier atomic
+    pub async fn with_sync(
+        base_file_path: PathBuf,
+        max_retries: usize,
+        retry_delay_ms: u64,
+        sync_on_flush: Arc<AtomicBool>,
     ) -> tokio::io::Result<Self> {
         if let Some(parent) = base_file_path.parent() {
             if let Some(parent_str) = parent.to_str() {
@@ -58,6 +79,7 @@ impl TransactionalFileWriter {
             file_size,
             max_retries,
             retry_delay_ms,
+            sync_on_flush,
         })
     }
 
@@ -219,9 +241,34 @@ impl TransactionalFileWriter {
 
     // -----------------------------------------------------------------------------
 
-    /// Flush the active file to disk
+    /// Flush the active file to disk, optionally executing hardware durability commit (fsync/fdatasync).
     pub async fn flush(&mut self) -> tokio::io::Result<()> {
-        self.file.flush().await
+        self.file.flush().await?;
+        if self.sync_on_flush.load(Ordering::Relaxed) {
+            self.file.sync_data().await?;
+        }
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------------
+
+    /// Dynamically toggle hardware durability barrier (fsync) on the fly.
+    pub fn set_sync_on_flush(&self, enabled: bool) {
+        self.sync_on_flush.store(enabled, Ordering::Relaxed);
+    }
+
+    // -----------------------------------------------------------------------------
+
+    /// Query current hardware durability barrier state.
+    pub fn is_sync_on_flush(&self) -> bool {
+        self.sync_on_flush.load(Ordering::Relaxed)
+    }
+
+    // -----------------------------------------------------------------------------
+
+    /// Access the underlying shared atomic boolean.
+    pub fn sync_on_flush_handle(&self) -> Arc<AtomicBool> {
+        self.sync_on_flush.clone()
     }
 
     // -----------------------------------------------------------------------------
@@ -237,6 +284,46 @@ impl TransactionalFileWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_transactional_writer_sync_on_flush_toggled_on_the_fly() {
+        let test_dir = std::env::temp_dir().join(format!("test_txn_fsync_{}", std::process::id()));
+        let _ = fs::create_dir_all(&test_dir).await;
+        let base_path = test_dir.join("_main.log");
+
+        let sync_flag = Arc::new(AtomicBool::new(false));
+        let mut writer = TransactionalFileWriter::with_sync(base_path.clone(), 3, 50, sync_flag.clone())
+            .await
+            .unwrap();
+
+        assert!(!writer.is_sync_on_flush());
+
+        // 1. Flush with fsync = false (OS page cache)
+        writer.write_batch(&["stage1".to_string()]).await.unwrap();
+        writer.flush().await.unwrap();
+
+        // 2. Toggle on the fly: fsync = true (hardware NAND commit)
+        writer.set_sync_on_flush(true);
+        assert!(writer.is_sync_on_flush());
+        assert!(sync_flag.load(Ordering::Relaxed));
+
+        writer.write_batch(&["stage2".to_string()]).await.unwrap();
+        writer.flush().await.unwrap();
+
+        // 3. Toggle back on the fly: fsync = false
+        sync_flag.store(false, Ordering::Relaxed);
+        assert!(!writer.is_sync_on_flush());
+
+        writer.write_batch(&["stage3".to_string()]).await.unwrap();
+        writer.flush().await.unwrap();
+
+        let content = fs::read_to_string(&base_path).await.unwrap();
+        assert_eq!(content, "stage1\nstage2\nstage3\n");
+
+        let _ = fs::remove_dir_all(&test_dir).await;
+    }
+
+    // -----------------------------------------------------------------------------
 
     #[tokio::test]
     async fn test_transactional_write_and_flush() {

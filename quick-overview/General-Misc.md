@@ -1,6 +1,6 @@
 ---
 tags:
-- '#ai/ignore'
+- '#ai/ready'
 - '#zone/3-fleet'
 - '#service/log-server'
 - '#type/operations-manual'
@@ -78,16 +78,20 @@ docker compose up -d log-server
 
 ## 🩺 Diagnostics & Troubleshooting
 
-Here are the primary diagnostic indicators you may see in the terminal or `logs/_main.log`:
+Here are the primary diagnostic indicators you may see in the terminal, web dashboard, or `logs/_main.log`:
 
-### `[SEQUENCE_GAP] Skipping missing sequence(s) X..Y after 500ms timeout`
-*   **What it means**: Network jitter or an ungraceful client shutdown has lost sequence numbers.
-*   **Action**: The server is functioning as designed; the built-in **500ms Gap Timer** has audited the gap and bypassed it to prevent backpressure from hanging active clients.
-
-### `[BUFFER_PRESSURE] Forcing progress to X (dropping gaps)`
-*   **What it means**: The sorted in-memory queue has reached its safety capacity limit (2048 packets).
-*   **Action**: The server is clearing memory by flushing current logs immediately. Verify client network stability or increase standard file system write speeds.
+### `[DISK_FAILURE] Failed writing batch to disk after exhausting retries: <err>`
+* **What it means**: The underlying filesystem or storage medium failed write syscalls (e.g. disk full, read-only remount `EROFS`, permission revocation).
+* **Action**: `log-server` writes a structured Level 11 (`CRITICAL`) entry to `LogRingBuffer` and exits with code 1. `watchdog-agent` monitors this failure, triggers its 3-crash/30-second circuit breaker, and fires a Telegram alert via `tele-remote`. Check storage quotas and filesystem permissions on the log volume.
 
 ### `TCP Connection established / Handshake timeout`
-*   **What it means**: A client opened a raw TCP socket but failed to send the mandatory Cap'n Proto `HelloMsg` within the 5-second window.
-*   **Action**: The server aborted the connection to defend against Slow-Loris attacks. Confirm the client is correctly using the reference Go/Python/Rust `microservice-toolbox` client libraries.
+* **What it means**: A client opened a raw TCP socket but failed to send the mandatory Cap'n Proto `HelloMsg` within the 5-second window.
+* **Action**: The server aborted the connection to defend against Slow-Loris attacks. Confirm the client is correctly using the reference Go/Python/Rust `microservice-toolbox` client libraries.
+
+### `Unexpected EOF mid-message (expected X bytes)`
+* **What it means**: A remote client closed the connection or crashed while in the middle of sending a framed payload.
+* **Action**: Logged as an internal warning. The reader safely discards the incomplete payload and resets without affecting other active streams.
+
+### `connection idle for 60s. Pruning zombie.`
+* **What it means**: An established client connection remained idle with no heartbeats or log packets for 60 seconds.
+* **Action**: Log-server automatically severed the connection to reclaim socket descriptors and prevent resource leaks.

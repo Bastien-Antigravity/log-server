@@ -21,6 +21,8 @@ use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, get_utc_timestamp};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use tokio::{
     sync::mpsc,
     time::Duration,
@@ -36,6 +38,7 @@ pub struct WriterConfig {
     pub max_file_bytes: u64,
     pub backup_count: usize,
     pub gap_timeout_ms: u64,
+    pub sync_on_flush: Arc<AtomicBool>,
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -50,6 +53,7 @@ impl Default for WriterConfig {
             max_file_bytes: 10 * 1024 * 1024, // 10 MB default
             backup_count: 10,
             gap_timeout_ms: 500,
+            sync_on_flush: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -129,6 +133,31 @@ impl LogWriter {
 
     //-----------------------------------------------------------------------------------------------
 
+    /// Dynamically toggle hardware durability barrier (fsync) on the fly.
+    pub fn set_sync_on_flush(&self, enabled: bool) {
+        self.config
+            .sync_on_flush
+            .store(enabled, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Query active hardware durability barrier (fsync) state.
+    pub fn is_sync_on_flush(&self) -> bool {
+        self.config
+            .sync_on_flush
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Access the underlying shared atomic boolean handle.
+    pub fn sync_on_flush_handle(&self) -> Arc<AtomicBool> {
+        self.config.sync_on_flush.clone()
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
     /// Rotate log files (delegates to TransactionalFileWriter)
     pub async fn rotate_files(base_path: &PathBuf, backup_count: usize) -> tokio::io::Result<()> {
         TransactionalFileWriter::rotate_files(base_path, backup_count).await
@@ -143,10 +172,11 @@ impl LogWriter {
         config: WriterConfig,
         ring_buffer: std::sync::Arc<crate::core::ring_buffer::LogRingBuffer>,
     ) -> tokio::io::Result<()> {
-        let mut sink = match TransactionalFileWriter::new(
+        let mut sink = match TransactionalFileWriter::with_sync(
             base_file_path,
             config.max_retries,
             config.retry_delay_ms,
+            config.sync_on_flush.clone(),
         )
         .await
         {

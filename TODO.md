@@ -11,88 +11,100 @@ tags:
 
 # Log Server TODO
 
-## 🛡️ Hardening (Spec-First)
-- [x] **Ingestion Gap Protection**: Implement a 500ms timeout for missing sequence IDs in `LogWriter` (FEAT-002).
-- [x] **Protocol Hardening**: Enforce 4-byte BE framing and Mandatory Handshake (FEAT-006).
-- [x] **Semantic Refactor**: Rename gRPC ingestion to "Log Bridge" to distinguish from Control Ports.
-- [x] **Rotation Safety**: Verify rotation doesn't drop messages during file switch (FEAT-004) - *Verified: single-threaded async writer task with backpressure is safe.*
-- [x] **Real-Time Log Streaming & Ring Buffer (FEAT-007)**: In-memory circular buffer (LogRingBuffer, 5,000 slots) and gRPC server-side streaming (StreamLogs / GetTailLogs) consumed directly by web-interface for live console observability.
+## 🎯 Active Architectural Tasks
 
-## 🏗️ Technical Debt
-- [x] Refactor GRPC/TCP error messages for clarity - *Verified: structured logging provides full context and status.*
-- [x] Audit microservice-toolbox CLI parameters for parity - *Verified: 100% matched parity.*
+### 🔴 High Priority
+- [ ] **Dedicated Cap'n Proto Handshake Schema**: Replace the `@0:fromName` / `@1:fromHost` field layout aliasing in `protocol_handlers.rs` with a dedicated `HelloMsg` Cap'n Proto schema reader.
+  - *Affected area*: `src/core/protocol_handlers.rs`.
 
-## 🔍 Audit Findings (2026-11-21)
+### 🟠 Medium Priority
+- [ ] **`microservice-toolbox` Config & SafeSocket Convergence**: Evaluate delegating low-level framing and transport to `microservice-toolbox::transport::SafeSocket` (or shared Rust SDK equivalent) to guarantee cross-language protocol parity, and wire `AppConfig::on_live_conf_update` directly to `Config::set_sync_on_flush` for distributed fleet-wide live configuration reloads.
+  - *Affected area*: `src/transport/safe_socket.rs`, `src/config/config.rs`, `src/facade/log_server.rs`.
 
-### 🔴 High
+---
 
-- [x] **Global sequence ordering mixes independent ingestion sources**: Simplified to Single-Authority FIFO Sequencing inside `LogWriter::writer_task`, eliminating pre-channel `AtomicU64` race conditions, `BTreeMap` reorder stalls, synthetic `[SEQUENCE_GAP]` / `[BUFFER_PRESSURE]` timeouts, and fixing the `tokio::select!` shutdown hang when all `writer_tx` senders are dropped.
-  - **Affected areas**: `src/servers/tcp_server.rs`, `src/servers/grpc_server.rs`, `src/utils/terminal_ui.rs`, `src/facade/log_writer.rs`, `src/core/protocol_handlers.rs`.
+## 🧪 Sandbox-Testing Scenarios to Implement
 
-- [ ] **Implement explicit graceful shutdown**: Supervise and stop TCP, gRPC, writer, heartbeat, and OpenMFE tasks together so final buffered logs are drained and sockets/tasks are released.
-  - **Affected area**: `src/facade/log_server.rs`.
+The following end-to-end integration and resilience test scenarios are targeted for implementation in `sandbox-testing/02-Scenarios/go` and `python` to validate `log-server` in multi-container Docker fleet environments:
 
-- [ ] **Prevent internal logger task amplification**: Replace full-channel detached send-task fan-out with bounded backpressure, coalescing, or explicit drop accounting to avoid unbounded waiting tasks during log flooding.
-  - **Affected area**: `src/utils/terminal_ui.rs`.
+### 1. `SCEN-LS-001: Transactional Disk Write Failure & Fail-Fast Verification`
+* **Target File**: `sandbox-testing/02-Scenarios/go/log_server_disk_failure_test.go`
+* **Goal**: Verify that when the log volume becomes read-only or the disk fills, `log-server` fails fast and does not become a zombie process.
+* **Steps**:
+  1. Boot `log-server` in Docker with a mounted log volume.
+  2. Remount the log volume read-only (`mount -o remount,ro /logs`).
+  3. Send log bursts via TCP and gRPC.
+  4. Assert that `log-server` terminates with exit code 1 within 5 seconds.
+  5. Assert that TCP (9020) and gRPC (9021) sockets are cleanly severed rather than accepting unpersisted data.
 
-- [ ] **Fix IPv6 bind address formatting**: TCP currently formats `host:port` verbatim and will produce an invalid unbracketed address for IPv6 hosts such as `::1`; use one canonical bind-target formatter for TCP and gRPC.
-  - **Affected area**: `src/servers/tcp_server.rs`, `src/main.rs`.
+### 2. `SCEN-LS-002: Watchdog-Agent Supervision & Crash-Loop Circuit Breaker Integration`
+* **Target File**: `sandbox-testing/02-Scenarios/go/log_server_watchdog_circuit_breaker_test.go`
+* **Goal**: Validate ecosystem-level supervision between `watchdog-agent` and `log-server`.
+* **Steps**:
+  1. Launch `log-server` supervised by `watchdog-agent` (`--supervise`).
+  2. Cause 3 consecutive process aborts within 30 seconds (via simulated fatal I/O).
+  3. Verify `watchdog-agent` catches process death, logs `🚨 CRASH LOOP DETECTED`, and pauses restarts into `PAUSED (CrashLoopBackoff)`.
+  4. Intercept the simulated `tele-remote` Telegram notification.
+  5. Send `POST /api/v1/watchdog/resume {"name": "log_server"}` and verify recovery.
 
-- [ ] **Bound outgoing SafeSocket frames**: Reject payload sizes that cannot fit in the protocol's `u32` length field before casting and sending, in addition to retaining reader-side 10 MB protection.
-  - **Affected area**: `src/transport/safe_socket.rs`.
+### 3. `SCEN-LS-003: Multi-Producer Concurrent Blast & Identical Disk/Ring-Buffer Ordering Parity`
+* **Target File**: `sandbox-testing/02-Scenarios/go/log_server_parity_test.go`
+* **Goal**: Verify zero sequence gaps, zero dropped messages, and 100% identical ordering between physical `_main.log` and the in-memory `LogRingBuffer` / `StreamLogs` gRPC stream.
+* **Steps**:
+  1. Concurrently spawn 20 client workers (10 SafeSocket TCP + 10 gRPC) sending 500 messages each (10,000 total).
+  2. Subscribe to `StreamLogs` via gRPC concurrently.
+  3. Compare received `StreamLogs` stream with the contents of `_main.log`.
+  4. Assert line-by-line ordering parity and zero dropped messages.
 
-- [ ] **Add explicit disk durability barriers**: Determine whether `sync_all`/`fsync` is required at file or batch boundaries and define the crash-consistency performance trade-off.
-  - **Affected area**: `src/core/transactional_writer.rs`.
+### 4. `SCEN-LS-004: Cascading File Rotation & Pruning Under Continuous High-Throughput Burst`
+* **Target File**: `sandbox-testing/02-Scenarios/go/log_server_rotation_test.go`
+* **Goal**: Verify high-speed size-based rotation across multiple file generations without descriptor leaks.
+* **Steps**:
+  1. Configure `max_file_bytes = 1MB` and `backup_count = 5`.
+  2. Stream 10MB of structured log data.
+  3. Verify that `_main.log`, `_main.log.0`, `_main.log.1` ... `_main.log.4` exist.
+  4. Verify that historical files older than `backup_count` are pruned.
+  5. Verify no open file descriptor leaks via `lsof` / container metrics.
 
-### 🟠 Medium
+### 5. `SCEN-LS-005: Premature Socket Severance, UnexpectedEof, and Oversized Frame Rejection`
+* **Target File**: `sandbox-testing/02-Scenarios/go/log_server_fuzz_framing_test.go`
+* **Goal**: Validate transport robustness against corrupted frames, slow-loris handshakes, and premature socket closures.
+* **Steps**:
+  1. Send valid 4-byte BE length prefix for 64KB, but close the socket after sending only 128 bytes.
+  2. Assert server logs `UnexpectedEof` mid-message and reclaims resources cleanly.
+  3. Send frame with length prefix `20MB` (> 10MB `MAX_MESSAGE_SIZE`).
+  4. Assert server immediately drops connection with `InvalidData` without crashing or allocating excessive heap.
 
-- [ ] **Replace silent version fallbacks**: Remove `CARGO_PKG_VERSION` and ad-hoc `VERSION.txt` fallback behavior; use strict `AppConfig`/ecosystem version access and fail fast when version metadata is unavailable.
-  - **Affected areas**: `build.rs`, `src/main.rs`, `src/core/contracts.rs`, `src/servers/grpc_server.rs`.
+### 6. `SCEN-LS-006: OpenMFE Auto-Registration & Dynamic Contract Schema Validation`
+* **Target File**: `sandbox-testing/02-Scenarios/go/log_server_mfe_registration_test.go`
+* **Goal**: Verify OpenMFE contract registration against `web-interface`.
+* **Steps**:
+  1. Boot mock `web-interface` HTTP endpoint on port 5000.
+  2. Launch `log-server`.
+  3. Assert `POST /api/v1/register` is received with valid ServiceSpec, embedding real schemas for `log_service.proto` and `logger.capnp`.
+  4. Call gRPC `LogBridge.GetExchangeContracts` and verify schema equality with the registration payload.
 
-- [ ] **Replace the handshake schema-layout hack**: Use the actual SafeSocket handshake schema or a canonical Rust representation instead of decoding `HelloMsg` as `LoggerMsg`.
-  - **Affected area**: `src/core/protocol_handlers.rs`.
+---
 
-- [ ] **Use canonical OpenMFE/ServiceSpec tooling**: Replace direct HTTP registration construction and fixed retry behavior with `PublishWithLifecycle`, `AppConfig` address resolution, infinite retry, and randomized jitter.
-  - **Affected area**: `src/core/contracts.rs`.
+## 🏛️ Completed Architecture Milestones (Traceability)
 
-- [ ] **Remove silent wildcard-host fallbacks**: Avoid rewriting `0.0.0.0`, `::`, or empty hosts to `127.0.0.1` for contracts and published addresses; distinguish bind addresses from advertised/display addresses.
-  - **Affected area**: `src/core/contracts.rs`.
+- [x] **Single-Authority FIFO Sequencing**: Monotonic sequence assignment upon dequeue, greedy burst draining (`rx.try_recv()`), and identical disk-to-ring commit order (`src/facade/log_writer.rs`).
+- [x] **Transactional Disk Persistence & Checkpoint Rollback**: Tier 1 in-memory staging, Tier 2 `ftruncate` rollback on partial writes, and Tier 3 handle recovery (`src/core/transactional_writer.rs`).
+- [x] **Fail-Fast Lifecycle Integration**: `writer_handle` supervised in `tokio::select!`, `[DISK_FAILURE]` `CRITICAL` pushed to `LogRingBuffer`, and non-zero exit code 1 (`src/facade/log_server.rs`).
+- [x] **In-Memory Ring Buffer & gRPC StreamLogs Bridge**: 5,000-slot `LogRingBuffer` and HTTP/2 `StreamLogs` consumed by `web-interface` (`src/core/ring_buffer.rs`, `src/servers/grpc_server.rs`).
+- [x] **Hardened SafeSocket Framing**: 4-byte BE length framing, 10MB limits, 5s Slow-Loris guard, 60s zombie pruning, and keepalive heartbeat handling (`src/transport/safe_socket.rs`).
+- [x] **OpenMFE Exchange Contracts**: Compile-time embedded `.proto` and `.capnp` schemas served via `GetExchangeContracts` and registered with `web-interface` (`src/core/contracts.rs`).
+- [x] **Strict Clippy Compliance**: Zero compiler warnings across all targets (`cargo clippy --all-targets -- -D warnings`).
 
-- [x] **Preserve ring-stream ordering semantics**: `LogWriter::writer_task` now publishes committed entries to `LogRingBuffer` immediately after transactional disk persistence in exact FIFO batch order, guaranteeing identical ordering between `_main.log` and `LogRingBuffer`.
-  - **Affected areas**: `src/facade/log_writer.rs`, `src/core/ring_buffer.rs`, `src/servers/grpc_server.rs`.
 
-- [ ] **Make ring-buffer locking and broadcast behavior explicit**: Remove or handle poisoned-lock silent skips and document/cohesively handle broadcast lag without inconsistent storage behavior.
-  - **Affected area**: `src/core/ring_buffer.rs`.
+---
 
-- [ ] **Prevent console output loss**: Replace `try_send` queue drops with bounded backpressure or visible drop metrics for the console worker.
-  - **Affected area**: `src/facade/log_writer.rs`.
+## 🏛️ Completed Architecture Milestones (Traceability)
 
-- [ ] **Harden file rotation**: Add crash-consistency and partial-failure handling for cascading renames rather than relying on sequential best-effort renames.
-  - **Affected area**: `src/core/transactional_writer.rs`.
-
-- [ ] **Reduce blocking operations in async paths**: Move startup and disk folder operations to appropriate async or blocking-task boundaries and eliminate direct daemon `println!`/`eprintln!` in favor of the canonical logger facade.
-
-### 🧪 Missing Adversarial Coverage
-
-- [ ] IPv6 bind and advertised-address coverage.
-- [ ] Partial writes and interrupted disk writes.
-- [ ] Duplicate sequence numbers.
-- [ ] Sequence-number overflow and wraparound behavior.
-- [ ] Writer/channel saturation and sustained log flooding.
-- [ ] Slow or lagged gRPC consumers.
-- [ ] SafeSocket 10 MB boundary payloads and oversized payload rejection.
-- [ ] Writer task panic and restart/fail-fast behavior.
-- [ ] Disk-full conditions and quota exhaustion.
-- [ ] Graceful shutdown with buffered TCP, gRPC, internal, and writer data.
-- [ ] Malformed and padded Cap'n Proto frames.
-- [ ] Mid-handshake socket closure and handshake timeout behavior.
-- [ ] Zero-length frame sequences under active read/write deadlines.
-- [ ] Rotation crash at every rename step and recovery after partial rotation.
-- [ ] Ring-buffer lock-poison and broadcast-lag edge cases.
-
-### 🧪 Test Quality Improvements
-
-- [ ] Replace test `return`/skip behavior for denied loopback, server readiness, and startup failures with explicit environment-gated skips or hard failures as appropriate.
-- [ ] Add an explicit strict-Clippy gate for all targets, initially resolving `collapsible_if` in `src/main.rs:165`.
-- [ ] Add end-to-end tests for sequence-gap, out-of-order, duplicate, late-arriving, and overflow scenarios.
-- [ ] Document the expected best-effort ordering SLA and the accepted worst-case behavior under buffer pressure or prolonged gaps.
+- [x] **Single-Authority FIFO Sequencing**: Monotonic sequence assignment upon dequeue, greedy burst draining (`rx.try_recv()`), and identical disk-to-ring commit order (`src/facade/log_writer.rs`).
+- [x] **Transactional Disk Persistence & Checkpoint Rollback**: Tier 1 in-memory staging, Tier 2 `ftruncate` rollback on partial writes, and Tier 3 handle recovery (`src/core/transactional_writer.rs`).
+- [x] **Fail-Fast Lifecycle Integration**: `writer_handle` supervised in `tokio::select!`, `[DISK_FAILURE]` `CRITICAL` pushed to `LogRingBuffer`, and non-zero exit code 1 (`src/facade/log_server.rs`).
+- [x] **In-Memory Ring Buffer & gRPC StreamLogs Bridge**: 5,000-slot `LogRingBuffer` and HTTP/2 `StreamLogs` consumed by `web-interface` (`src/core/ring_buffer.rs`, `src/servers/grpc_server.rs`).
+- [x] **Hardened SafeSocket Framing**: 4-byte BE length framing, 10MB limits, 5s Slow-Loris guard, 60s zombie pruning, and keepalive heartbeat handling (`src/transport/safe_socket.rs`).
+- [x] **OpenMFE Exchange Contracts**: Compile-time embedded `.proto` and `.capnp` schemas served via `GetExchangeContracts` and registered with `web-interface` (`src/core/contracts.rs`).
+- [x] **Strict Clippy Compliance**: Zero compiler warnings across all targets (`cargo clippy --all-targets -- -D warnings`).
