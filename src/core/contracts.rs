@@ -13,6 +13,8 @@
 //! - app_config: Active pre-loaded AppConfig for web_interface service discovery.
 
 use microservice_toolbox::config::loader::AppConfig;
+pub use microservice_toolbox::contracts::LOGGER_CAPNP_SCHEMA;
+use microservice_toolbox::contracts::extract_capnp_operations;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -21,7 +23,6 @@ use tokio::net::TcpStream;
 use crate::config::config::Config;
 
 pub const LOG_SERVICE_PROTO: &str = include_str!("../schema/proto/log_service.proto");
-pub const LOGGER_CAPNP_SCHEMA: &str = include_str!("../schema/capnp/logger.capnp");
 
 //-----------------------------------------------------------------------------------------------
 
@@ -37,6 +38,7 @@ fn display_host(host: &str) -> &str {
 
 /// Build exhaustive list of log-server exchange contracts anchored to runtime config & real schema files.
 pub fn build_exchange_contracts_value(config: &Config, ring_capacity: usize) -> Value {
+    let capnp_ops = extract_capnp_operations(LOGGER_CAPNP_SCHEMA);
     let host = display_host(&config.host);
     let grpc_host = display_host(&config.grpc_host);
     let tcp_addr = format!("{}:{}", host, config.port);
@@ -123,14 +125,11 @@ pub fn build_exchange_contracts_value(config: &Config, ring_capacity: usize) -> 
             "framing": "serialize_packed(LoggerMsg) (schema ID @0xfc867d59c4f2e15c)",
             "auth": "Preceded by unpacked HelloMsg handshake",
             "summary": "Zero-copy wire schema shared across Go, Python, and Rust Universal Logger clients with 12 monotonic severity levels and 16 LoggerMsg text/enum slots.",
-            "source": "log-server/src/schema/capnp/logger.capnp (include_str!)",
+            "source": "microservice-toolbox/schemas/platform/logger.capnp (SSoT)",
             "peers": [
                 { "service": "universal-logger / fleet daemons", "role": "producer", "description": "Serializes LoggerMsg in Go/Python/Rust with zero string formatting overhead" }
             ],
-            "operations": [
-                { "name": "Level", "kind": "ENUM", "target": "enum Level (@0xfc867d59c4f2e15c)", "output": "notset(0)..critical(11)", "description": "12 severity levels matching protobuf logservice.Level" },
-                { "name": "LoggerMsg", "kind": "STRUCT", "target": "struct LoggerMsg (@0..@15)", "input": "timestamp, hostname, loggerName, module, level, filename, functionName, lineNumber, message, pathName, processId, processName, threadId, threadName, serviceName, stackTrace", "description": "Primary packed wire payload schema for telemetry ingestion" }
-            ],
+            "operations": capnp_ops,
             "schemaFormat": "capnp",
             "schema": LOGGER_CAPNP_SCHEMA
         }
@@ -269,6 +268,18 @@ mod tests {
         assert_eq!(arr[1]["id"], "proto");
         assert_eq!(arr[1]["address"], "log-server:19021");
         assert_eq!(arr[2]["id"], "capnp");
+        assert_eq!(
+            arr[2]["source"],
+            "microservice-toolbox/schemas/platform/logger.capnp (SSoT)"
+        );
+        let capnp_ops = arr[2]["operations"]
+            .as_array()
+            .expect("capnp operations array");
+        assert_eq!(capnp_ops.len(), 2);
+        assert_eq!(capnp_ops[0]["name"], "Level");
+        assert_eq!(capnp_ops[0]["kind"], "ENUM");
+        assert_eq!(capnp_ops[1]["name"], "LoggerMsg");
+        assert_eq!(capnp_ops[1]["kind"], "STRUCT");
         assert!(arr[1]["schema"].as_str().unwrap().contains("GetExchangeContracts"));
         assert!(arr[2]["schema"].as_str().unwrap().contains("struct LoggerMsg"));
 

@@ -13,6 +13,7 @@
 //! KEY PARAMETERS:
 //! - max_retries: Number of retry attempts on transient write failures.
 //! - retry_delay_ms: Backoff duration between retries in milliseconds.
+// cli:allow-print
 //! - sync_on_flush: Dynamic atomic hardware durability barrier (fsync).
 
 use std::path::PathBuf;

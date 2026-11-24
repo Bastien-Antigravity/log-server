@@ -10,6 +10,7 @@
 //! - get_hostname: Cached system hostname lookup via OnceLock.
 //! - truncate: String truncation with unicode-safe boundaries.
 //! - line_str!: Macro to stringify source line numbers.
+// cli:allow-print
 
 use std::path::PathBuf;
 use std::process::Command;

@@ -9,6 +9,7 @@
 //! KEY PARAMETERS:
 //! - MAX_MESSAGE_SIZE: 10MB guard against unbounded allocation attacks.
 //! - 4-byte big-endian integer length framing header.
+// cli:allow-print
 
 use bytes::BytesMut;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};

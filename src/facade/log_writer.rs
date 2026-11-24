@@ -13,6 +13,7 @@
 //! KEY PARAMETERS:
 //! - max_file_bytes: 10MB per log chunk before rotation.
 //! - backup_count: Number of historical rotated log files preserved (default 10).
+// cli:allow-print
 //! - gap_timeout_ms: Periodic flush interval clamping window in milliseconds.
 
 use crate::core::log_formatter::format_log_message;
