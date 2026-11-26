@@ -23,6 +23,7 @@ use microservice_toolbox::config::loader::AppConfig;
 #[derive(Clone)]
 pub struct Config {
     pub name: String,
+    pub version: String,
     pub host: String,
     pub port: u16,
     pub grpc_host: String,
@@ -33,16 +34,25 @@ pub struct Config {
 //-----------------------------------------------------------------------------------------------
 
 impl Config {
-    /// Create new server configuration
+    /// Create new server configuration resolving version strictly from VERSION.txt via microservice-toolbox
     pub fn new(name: &str, host: &str, port: u16, grpc_port: u16) -> Self {
         Self {
             name: name.to_string(),
+            version: microservice_toolbox::version::get_version(),
             host: host.to_string(),
             port,
             grpc_host: host.to_string(),
             grpc_port,
             sync_on_flush: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    //-----------------------------------------------------------------------------------------------
+
+    /// Set authoritative service version resolved via AppConfig::get_version()
+    pub fn with_version(mut self, version: &str) -> Self {
+        self.version = version.to_string();
+        self
     }
 
     //-----------------------------------------------------------------------------------------------

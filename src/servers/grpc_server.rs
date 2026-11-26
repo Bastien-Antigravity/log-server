@@ -284,11 +284,10 @@ impl LogBridge for LogBridgeServiceImpl {
         &self,
         _request: Request<ContractsRequest>,
     ) -> Result<Response<ContractsResponse>, Status> {
-        let version = option_env!("APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
         let contracts_json = build_exchange_contracts_json(&self.config, 5000);
         Ok(Response::new(ContractsResponse {
             service: "log_server".to_string(),
-            version: version.to_string(),
+            version: self.config.version.clone(),
             reliable: true,
             exhaustive: true,
             source: "log-server live gRPC LogBridge.GetExchangeContracts (embedded .proto / .capnp / SafeSocket)"

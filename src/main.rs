@@ -20,8 +20,6 @@ use log_server::facade::log_server::LogServer;
 use log_server::line_str;
 use log_server::utils::terminal_ui::print_internal_log;
 
-pub const VERSION: &str = env!("APP_VERSION");
-
 //-----------------------------------------------------------------------------------------------
 
 fn main() {
@@ -43,6 +41,18 @@ fn main() {
 
     let name = ac.cli_args.name.as_deref().unwrap_or("log_server");
     let identity = name.to_string();
+    let version = ac.get_version();
+    if version.trim().is_empty() {
+        print_internal_log(
+            "CRITICAL",
+            &identity,
+            "main.rs",
+            "main",
+            line_str!(),
+            "Fatal: AppConfig::get_version() returned empty string (missing VERSION.txt)",
+        );
+        std::process::exit(1);
+    }
 
     let endpoints = match resolve_service_addrs(&ac, name) {
         Ok(addrs) => addrs,
@@ -60,7 +70,7 @@ fn main() {
         line_str!(),
         &format!(
             "starting log server (version {}) with profile: {}",
-            VERSION,
+            version,
             ac.profile
         ),
     );
@@ -82,6 +92,7 @@ fn main() {
         endpoints.tcp.port,
         endpoints.grpc.port,
     )
+    .with_version(&version)
     .with_grpc_host(&endpoints.grpc.host)
     .with_sync_on_flush(fsync_enabled);
     if let Err(e) = run_server(config, Arc::new(ac), enable_grpc) {

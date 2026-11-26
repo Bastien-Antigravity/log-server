@@ -5,6 +5,7 @@ tags:
 - '#service/log-server'
 - '#type/testing-playbook'
 - '#state/active'
+- '#ai/ignore'
 microservice: log-server
 type: testing-playbook
 status: active

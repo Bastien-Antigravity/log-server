@@ -5,6 +5,7 @@ tags:
 - '#service/log-server'
 - '#type/operations-manual'
 - '#state/active'
+- '#ai/ignore'
 microservice: log-server
 type: operations-manual
 status: active

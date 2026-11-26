@@ -15,10 +15,9 @@
 use microservice_toolbox::config::loader::AppConfig;
 pub use microservice_toolbox::contracts::LOGGER_CAPNP_SCHEMA;
 use microservice_toolbox::contracts::extract_capnp_operations;
+use microservice_toolbox::spec::{publish, ExchangeContract, ServiceSpec};
 use serde_json::{json, Value};
-use std::time::Duration;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use std::collections::HashMap;
 
 use crate::config::config::Config;
 
@@ -145,43 +144,52 @@ pub fn build_exchange_contracts_json(config: &Config, ring_capacity: usize) -> S
 
 //-----------------------------------------------------------------------------------------------
 
-/// Build canonical OpenMFE ServiceSpec payload for POST /api/v1/register on web-interface.
-pub fn build_service_spec_payload(config: &Config, ring_capacity: usize) -> String {
-    let version = option_env!("APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"));
+/// Build canonical OpenMFE ServiceSpec for log-server.
+pub fn build_service_spec(config: &Config, ring_capacity: usize) -> ServiceSpec {
     let host = display_host(&config.host);
-    let contracts = build_exchange_contracts_value(config, ring_capacity);
-    let framing = format!("Port {} SafeSocket TCP / Port {} gRPC", config.port, config.grpc_port);
+    let contracts_val = build_exchange_contracts_value(config, ring_capacity);
+    let contracts: Vec<ExchangeContract> =
+        serde_json::from_value(contracts_val).unwrap_or_default();
 
-    let payload = json!({
-        "name": "log_server",
-        "tag": "log-server-inspector",
-        "url": "/static/js/log-server-inspector.js",
-        "navTitle": "📜 Log Server",
-        "layer": "L1",
-        "category": "Base Fleet",
-        "priority": 15,
-        "icon": "fa-file-text-o",
-        "requiresAuth": false,
-        "capability": "log_server",
-        "desc": "Centralized asynchronous log ingestion engine supporting packed Cap'n Proto over SafeSocket TCP and Tonic gRPC streams.",
-        "protocol": "Cap'n Proto TCP & gRPC",
-        "framing": framing,
-        "docLink": "obsidian-brain/06-Microservices/Log-Server-Hub.md",
-        "contracts": contracts,
-        "dataStructure": {
-            "version": version,
-            "capability": "log_server",
-            "ports": {
-                "tcp": config.port.to_string(),
-                "grpc": config.grpc_port.to_string(),
-                "address": format!("{}:{}", host, config.port)
-            },
-            "ring_buffer_capacity": ring_capacity
-        },
-        "sdkLang": "language-rust"
-    });
+    let mut data_structure = HashMap::new();
+    data_structure.insert("version".to_string(), Value::String(config.version.clone()));
+    data_structure.insert("capability".to_string(), Value::String("log_server".to_string()));
+    data_structure.insert(
+        "ports".to_string(),
+        json!({
+            "tcp": config.port.to_string(),
+            "grpc": config.grpc_port.to_string(),
+            "address": format!("{}:{}", host, config.port)
+        }),
+    );
+    data_structure.insert("ring_buffer_capacity".to_string(), json!(ring_capacity));
 
-    payload.to_string()
+    ServiceSpec {
+        name: "log_server".to_string(),
+        tag: "log-server-inspector".to_string(),
+        url: "/static/js/log-server-inspector.js".to_string(),
+        nav_title: "📜 Log Server".to_string(),
+        layer: "L1".to_string(),
+        category: "Base Fleet".to_string(),
+        priority: 15,
+        icon: "fa-file-text-o".to_string(),
+        requires_auth: false,
+        capability: "log_server".to_string(),
+        description: "Centralized asynchronous log ingestion engine supporting packed Cap'n Proto over SafeSocket TCP and Tonic gRPC streams.".to_string(),
+        protocol: "Cap'n Proto TCP & gRPC".to_string(),
+        framing: format!("Port {} SafeSocket TCP / Port {} gRPC", config.port, config.grpc_port),
+        doc_link: "obsidian-brain/06-Microservices/Log-Server-Hub.md".to_string(),
+        contracts,
+        data_structure,
+        sdk_lang: "language-rust".to_string(),
+        ..ServiceSpec::default()
+    }
+}
+
+/// Build canonical OpenMFE ServiceSpec payload JSON string for log-server.
+pub fn build_service_spec_payload(config: &Config, ring_capacity: usize) -> String {
+    serde_json::to_string(&build_service_spec(config, ring_capacity))
+        .unwrap_or_else(|_| "{}".to_string())
 }
 
 //-----------------------------------------------------------------------------------------------
@@ -203,48 +211,19 @@ pub fn resolve_web_interface_addr(app_config: &AppConfig) -> Option<String> {
 
 //-----------------------------------------------------------------------------------------------
 
-/// Non-blocking 30s heartbeat registering log-server's authoritative contracts with web-interface.
+/// Non-blocking registration publishing log-server's ServiceSpec & ExchangeContracts via microservice-toolbox.
 pub fn spawn_web_interface_registration(
     config: Config,
     ring_capacity: usize,
     app_config: Option<&AppConfig>,
 ) {
-    let web_addr = match app_config.and_then(resolve_web_interface_addr) {
-        Some(addr) => addr,
-        None => return,
+    let ac = match app_config {
+        Some(ac) if resolve_web_interface_addr(ac).is_some() => ac,
+        _ => return,
     };
 
-    tokio::spawn(async move {
-        let payload = build_service_spec_payload(&config, ring_capacity);
-        let mut delay = Duration::from_secs(1);
-
-        loop {
-            let request = format!(
-                "POST /api/v1/register HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                web_addr,
-                payload.len(),
-                payload
-            );
-
-            let mut registered = false;
-            if let Ok(mut stream) = TcpStream::connect(&web_addr).await {
-                if stream.write_all(request.as_bytes()).await.is_ok() {
-                    let mut resp = Vec::new();
-                    let _ = tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut resp)).await;
-                    let resp_str = String::from_utf8_lossy(&resp);
-                    if resp_str.contains(" 200 ") || resp_str.contains(" 201 ") {
-                        registered = true;
-                        delay = Duration::from_secs(30);
-                    }
-                }
-            }
-
-            if !registered {
-                delay = std::cmp::min(delay * 2, Duration::from_secs(30));
-            }
-            tokio::time::sleep(delay).await;
-        }
-    });
+    let spec = build_service_spec(&config, ring_capacity);
+    let _ = publish(ac, None, "log_server", spec);
 }
 
 //-----------------------------------------------------------------------------------------------

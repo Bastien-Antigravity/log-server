@@ -5,6 +5,7 @@ tags:
 - '#service/log-server'
 - '#type/features-behavior'
 - '#state/active'
+- '#ai/ignore'
 microservice: log-server
 type: features-behavior
 status: active

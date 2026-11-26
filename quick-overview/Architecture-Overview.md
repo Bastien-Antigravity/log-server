@@ -5,6 +5,7 @@ tags:
 - '#service/log-server'
 - '#type/architecture-overview'
 - '#state/active'
+- '#ai/ignore'
 microservice: log-server
 type: architecture-overview
 status: active
