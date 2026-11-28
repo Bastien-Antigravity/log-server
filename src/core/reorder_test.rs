@@ -181,13 +181,11 @@ mod tests {
             .unwrap();
         let ring_buffer = Arc::new(crate::core::ring_buffer::LogRingBuffer::new(2000));
         let (tx, writer_handle) = writer.start_writer_task(ring_buffer.clone());
-        let unused_counter = Arc::new(AtomicU64::new(0));
 
         // Spawn 10 concurrent producer tasks each sending 100 messages (1,000 total)
         let mut producer_handles = Vec::new();
         for producer_id in 0..10 {
             let producer_tx = tx.clone();
-            let counter_clone = unused_counter.clone();
             producer_handles.push(tokio::spawn(async move {
                 for msg_idx in 0..100 {
                     if msg_idx % 7 == 0 {
@@ -199,7 +197,7 @@ mod tests {
                         level: 3,
                         ..LogEntry::default()
                     };
-                    handle_grpc_message(entry, producer_tx.clone(), counter_clone.clone())
+                    handle_grpc_message(entry, &producer_tx)
                         .await
                         .unwrap();
                 }

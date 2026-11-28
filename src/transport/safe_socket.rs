@@ -39,14 +39,24 @@ pub struct SafeSocket {
 
 impl SafeSocketReader {
     /// Receive framed data from socket. Returns empty BytesMut on 0-length heartbeat frames.
+    /// Distinguishes a clean 0-byte EOF between frames (`Ok(None)`) from a truncated 1..3-byte
+    /// frame header (`Err(UnexpectedEof)`).
     pub async fn receive_data(&mut self) -> io::Result<Option<BytesMut>> {
-        // big-endian u32 length prefix
+        // Read first header byte separately to distinguish clean disconnect from partial header
         let mut length_buf = [0u8; 4];
-        let n = self.reader.read_exact(&mut length_buf).await;
+        match self.reader.read(&mut length_buf[..1]).await {
+            Ok(0) => return Ok(None),
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+            Err(e) => return Err(e),
+        }
 
-        if let Err(e) = n {
+        if let Err(e) = self.reader.read_exact(&mut length_buf[1..]).await {
             if e.kind() == io::ErrorKind::UnexpectedEof {
-                return Ok(None);
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "connection closed mid-header (truncated 4-byte frame length prefix)",
+                ));
             }
             return Err(e);
         }
@@ -295,6 +305,42 @@ mod tests {
         let res = writer.send_data(huge_ref).await;
         assert!(res.is_err());
         assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::InvalidInput);
+
+        let _ = server_task.await;
+    }
+
+    // -----------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_truncated_header_returns_unexpected_eof_error() {
+        let listener = match TcpListener::bind("127.0.0.1:0").await {
+            Ok(l) => l,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("bind failed: {e}"),
+        };
+        let addr = listener.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            // Send only 2 bytes of a 4-byte length header, then close socket
+            socket.write_all(&[0x00, 0x05]).await.unwrap();
+            drop(socket);
+        });
+
+        let client_stream = match TcpStream::connect(addr).await {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => return,
+            Err(e) => panic!("connect failed: {e}"),
+        };
+        let safe_socket = SafeSocket::new(client_stream);
+        let (mut reader, _) = safe_socket.split();
+
+        let res = reader.receive_data().await;
+        assert!(
+            res.is_err(),
+            "Truncated 2-byte frame header must return UnexpectedEof error, not Ok(None)"
+        );
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
 
         let _ = server_task.await;
     }

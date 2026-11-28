@@ -36,13 +36,13 @@ The `log-server` testing strategy is split into three cohesive verification laye
 
 Always run tests from the root of the `log-server` repository.
 
-### 1. Run the Entire Test Suite (43 Tests)
+### 1. Run the Entire Test Suite (46 Tests)
 Executes all unit and integration tests across library, main, and integration targets:
 ```bash
 cargo test
 ```
 
-### 2. Run Library Unit Tests Only (35 Tests)
+### 2. Run Library Unit Tests Only (42 Tests)
 Focuses on internal logic, sequencing, ring buffer, and persistence with zero external port binding:
 ```bash
 cargo test --lib
@@ -68,7 +68,7 @@ cargo clippy --all-targets -- -D warnings
 
 ---
 
-## 🔬 Test Suite Catalog (43 Tests)
+## 🔬 Test Suite Catalog (46 Tests)
 
 ### 1. Single-Authority FIFO Sequencing & Concurrency (`src/core/reorder_test.rs`)
 * `test_single_authority_fifo_ordering_ignores_caller_sequence_drift`: Asserts that `LogWriter` acts as the single sequence authority, ordering messages strictly by MPSC arrival order and ignoring caller-supplied sequence numbers without synthetic gap delays.
@@ -91,16 +91,19 @@ cargo clippy --all-targets -- -D warnings
 * `test_ring_buffer_capacity_and_fifo`: Asserts bounded 5,000-slot memory usage, monotonic total ingestion counter, and correct FIFO eviction.
 * `test_ring_buffer_filters`: Tests filtering by service name and minimum numerical log level.
 * `test_ring_buffer_broadcast`: Verifies instant real-time packet delivery to active Tokio broadcast channel subscribers with zero lag.
+* `test_ring_buffer_recovers_from_poisoned_lock`: Verifies that `push()` and `get_tail()` recover cleanly from a poisoned `RwLock` without losing count parity.
 
 ### 5. SafeSocket Transport & Network Framing (`src/transport/safe_socket.rs`)
 * `test_heartbeat_skip`: Validates that zero-length keepalive frames (`0x00000000`) are safely acknowledged without triggering deserialization.
 * `test_oversized_message_rejected`: Asserts that payloads exceeding 10MB (`MAX_MESSAGE_SIZE`) are rejected with `InvalidData` to prevent memory exhaustion.
 * `test_outgoing_oversized_message_rejected`: Asserts that outgoing frames larger than 10MB are rejected upfront with `InvalidInput` before socket transmission.
 * `test_unexpected_eof_mid_message`: Asserts that connections terminated mid-payload return clean `UnexpectedEof` errors rather than hanging.
+* `test_truncated_header_returns_unexpected_eof_error`: Asserts that connections closed after 1–3 bytes of the 4-byte length prefix return `UnexpectedEof` rather than being misclassified as a clean disconnect.
 
 ### 6. Protocol Handlers & Contract Governance (`src/core/contracts.rs`, `protocol_handlers.rs`)
-* `test_identify_client_from_valid_handshake`: Verifies client identity extraction (`service@host`) from unpacked Cap'n Proto `HelloMsg`.
+* `test_identify_client_from_valid_handshake`: Verifies client identity extraction (`service@host`) from unpacked Cap'n Proto `HelloMsg` via `hello_msg::Reader`.
 * `test_identify_client_from_corrupted_handshake`: Verifies graceful error rejection on malformed handshake frames.
+* `test_handle_tcp_message_packed_roundtrip`: Verifies packed Cap'n Proto `LoggerMsg` decoding into `LogPacket` with zero allocation for empty optional fields.
 * `test_build_exchange_contracts_embeds_real_schemas`: Asserts that real `.proto` and `.capnp` schema contents are compile-time embedded in ServiceSpec metadata.
 * `test_display_host_normalization`: Validates that wildcard hosts (`0.0.0.0`, `::`) normalize to `127.0.0.1` for local service registration.
 * `test_resolve_web_interface_addr_from_app_config`: Verifies dynamic discovery of `web_interface` registration endpoint.

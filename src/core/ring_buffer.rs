@@ -44,17 +44,20 @@ impl LogRingBuffer {
 
     /// Push a new log entry into the circular buffer and broadcast to live subscribers
     pub fn push(&self, entry: LogEntry) {
+        let mut lock = self
+            .buffer
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if lock.len() >= self.capacity {
+            lock.pop_front();
+        }
+        lock.push_back(entry.clone());
+        drop(lock);
+
         self.total_ingested.fetch_add(1, Ordering::Relaxed);
 
         // Real-time broadcast: send to any active gRPC streams (ignore Err when no listeners)
-        let _ = self.broadcast_tx.send(entry.clone());
-
-        if let Ok(mut lock) = self.buffer.write() {
-            if lock.len() >= self.capacity {
-                lock.pop_front();
-            }
-            lock.push_back(entry);
-        }
+        let _ = self.broadcast_tx.send(entry);
     }
 
     // -----------------------------------------------------------------------------
@@ -73,14 +76,15 @@ impl LogRingBuffer {
         service_filter: Option<&str>,
         min_level: Option<i32>,
     ) -> Vec<LogEntry> {
-        let lock = match self.buffer.read() {
-            Ok(guard) => guard,
-            Err(_) => return Vec::new(),
-        };
+        let lock = self
+            .buffer
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
 
         let effective_limit = if limit == 0 { 100 } else { limit.min(self.capacity) };
 
-        lock.iter()
+        let mut entries: Vec<LogEntry> = lock
+            .iter()
             .rev()
             .filter(|e| {
                 if let Some(svc) = service_filter {
@@ -97,10 +101,9 @@ impl LogRingBuffer {
             })
             .take(effective_limit)
             .cloned()
-            .collect::<Vec<LogEntry>>()
-            .into_iter()
-            .rev()
-            .collect()
+            .collect();
+        entries.reverse();
+        entries
     }
 
     // -----------------------------------------------------------------------------
@@ -182,6 +185,31 @@ mod tests {
         let received = rx.recv().await.expect("Failed to receive broadcast");
         assert_eq!(received.message, "live broadcast message");
         assert_eq!(received.service_name, "live_test");
+    }
+
+    #[test]
+    fn test_ring_buffer_recovers_from_poisoned_lock() {
+        let ring = std::sync::Arc::new(LogRingBuffer::new(5));
+        let ring_clone = ring.clone();
+
+        // Poison the RwLock by panicking while holding a write guard
+        let _ = std::thread::spawn(move || {
+            let _guard = ring_clone.buffer.write().unwrap();
+            panic!("simulated panic holding write lock");
+        })
+        .join();
+
+        // push() and get_tail() must recover seamlessly via into_inner()
+        ring.push(LogEntry {
+            message: "recovered entry".to_string(),
+            service_name: "survivor".to_string(),
+            level: 3,
+            ..Default::default()
+        });
+        assert_eq!(ring.total_ingested(), 1);
+        let tail = ring.get_tail(5, None, None);
+        assert_eq!(tail.len(), 1);
+        assert_eq!(tail[0].message, "recovered entry");
     }
 }
 

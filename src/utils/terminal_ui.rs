@@ -7,12 +7,12 @@
 //! 3. Asynchronous FIFO queue dispatch to writer task for disk persistence
 //!
 //! KEY PARAMETERS:
-//! - INTERNAL_SENDER: OnceLock channel to writer task for self-logging.
-//! - INTERNAL_COUNTER: OnceLock atomic handle retained for signature compatibility.
+//! - INTERNAL_SENDER: RwLock channel to writer task for self-logging.
+//! - DROPPED_INTERNAL_LOGS: Atomic counter tracking internal records dropped under channel saturation.
 
 use chrono::Utc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use tokio::sync::mpsc;
 
 use crate::models::log_entry::LogEntry;
@@ -20,18 +20,14 @@ use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, truncate};
 
 static INTERNAL_SENDER: RwLock<Option<mpsc::Sender<LogPacket>>> = RwLock::new(None);
-static INTERNAL_COUNTER: RwLock<Option<Arc<AtomicU64>>> = RwLock::new(None);
 static DROPPED_INTERNAL_LOGS: AtomicU64 = AtomicU64::new(0);
 
 //-----------------------------------------------------------------------------------------------
 
-/// Initialize the internal logger with a sender and counter
-pub fn set_internal_logger(sender: mpsc::Sender<LogPacket>, counter: Arc<AtomicU64>) {
+/// Initialize the internal logger with a sender channel
+pub fn set_internal_logger(sender: mpsc::Sender<LogPacket>) {
     if let Ok(mut lock) = INTERNAL_SENDER.write() {
         *lock = Some(sender);
-    }
-    if let Ok(mut lock) = INTERNAL_COUNTER.write() {
-        *lock = Some(counter);
     }
 }
 
@@ -40,9 +36,6 @@ pub fn set_internal_logger(sender: mpsc::Sender<LogPacket>, counter: Arc<AtomicU
 /// Clear the internal logger during graceful shutdown to drop the writer channel sender
 pub fn clear_internal_logger() {
     if let Ok(mut lock) = INTERNAL_SENDER.write() {
-        *lock = None;
-    }
-    if let Ok(mut lock) = INTERNAL_COUNTER.write() {
         *lock = None;
     }
 }

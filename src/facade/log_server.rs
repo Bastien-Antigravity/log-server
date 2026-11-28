@@ -60,6 +60,46 @@ impl LogServer {
         if let Some(ref ac) = app_config {
             let fsync_enabled = crate::config::config::parse_fsync_config(ac);
             config.set_sync_on_flush(fsync_enabled);
+            microservice_toolbox::wiretap::configure_from_config(&config.name, ac);
+
+            // Wire live config hot-reload to update hardware durability barrier (fsync) on the fly
+            let sync_flag = config.sync_on_flush.clone();
+            let svc_name = config.name.clone();
+            let cap_key = svc_name.replace('-', "_");
+            ac.on_live_conf_update(move |val| {
+                let raw_fsync = val
+                    .get(&cap_key)
+                    .and_then(|s| s.get("fsync"))
+                    .or_else(|| val.get("log_server").and_then(|s| s.get("fsync")))
+                    .or_else(|| {
+                        val.get("capabilities").and_then(|c| {
+                            c.get(&cap_key)
+                                .and_then(|s| s.get("fsync"))
+                                .or_else(|| c.get("log_server").and_then(|s| s.get("fsync")))
+                                .or_else(|| c.get(format!("{cap_key}.fsync")))
+                                .or_else(|| c.get("log_server.fsync"))
+                        })
+                    });
+                if let Some(v) = raw_fsync {
+                    let enabled = v.as_bool().unwrap_or_else(|| {
+                        v.as_str()
+                            .map(|s| {
+                                let lower = s.trim().to_lowercase();
+                                lower == "true" || lower == "1" || lower == "yes"
+                            })
+                            .unwrap_or(false)
+                    });
+                    sync_flag.store(enabled, std::sync::atomic::Ordering::Relaxed);
+                    print_internal_log(
+                        "INFO",
+                        &svc_name,
+                        "log_server.rs",
+                        "on_live_conf_update",
+                        line_str!(),
+                        &format!("live config hot-reload applied: fsync={enabled}"),
+                    );
+                }
+            });
         } else if let Ok(val) = std::env::var("LS_FSYNC") {
             let val = val.trim().to_lowercase();
             let fsync_enabled = val == "true" || val == "1" || val == "yes";
@@ -122,11 +162,8 @@ impl LogServer {
         // Start a single writer task for all components to share
         let (writer_tx, mut writer_handle) = self.writer.start_writer_task(ring_buffer.clone());
 
-        // Centralized sequence counter for global ordering
-        let sequence_counter = Arc::new(std::sync::atomic::AtomicU64::new(0));
-
         // Initialize the internal logger so it can also write to files
-        crate::utils::terminal_ui::set_internal_logger(writer_tx.clone(), sequence_counter.clone());
+        crate::utils::terminal_ui::set_internal_logger(writer_tx.clone());
 
         print_internal_log(
             "INFO",
@@ -154,11 +191,10 @@ impl LogServer {
         // Start TCP server (always)
         let tcp_server = TcpServer::new(&self.config);
         let tcp_writer_tx = writer_tx.clone();
-        let tcp_sequence_counter = sequence_counter.clone();
         let identity = self.name.clone();
 
         let mut tcp_handle = tokio::spawn(async move {
-            if let Err(e) = tcp_server.run(tcp_writer_tx, tcp_sequence_counter).await {
+            if let Err(e) = tcp_server.run(tcp_writer_tx).await {
                 print_internal_log(
                     "ERROR",
                     &identity,
@@ -178,14 +214,10 @@ impl LogServer {
         let mut grpc_handle = if self.enable_grpc {
             let grpc_server = LogBridgeGateway::new(&self.config);
             let grpc_writer_tx = writer_tx.clone();
-            let grpc_sequence_counter = sequence_counter.clone();
             let grpc_ring_buffer = ring_buffer.clone();
 
             Some(tokio::spawn(async move {
-                if let Err(e) = grpc_server
-                    .run(grpc_writer_tx, grpc_sequence_counter, grpc_ring_buffer)
-                    .await
-                {
+                if let Err(e) = grpc_server.run(grpc_writer_tx, grpc_ring_buffer).await {
                     print_internal_log(
                         "ERROR",
                         &identity_grpc,
@@ -219,13 +251,14 @@ impl LogServer {
             self.app_config.as_deref(),
         );
 
-        // Wait for servers or writer task to complete; abort if any fails
-        tokio::select! {
+        // Wait for any server task, writer task, or OS termination signal; then execute unified teardown
+        let mut writer_finished = false;
+        let outcome: Result<(), String> = tokio::select! {
             res = &mut tcp_handle => {
                 match res {
                     Ok(Ok(())) => Ok(()),
-                    Ok(Err(e)) => Err(e.into()),
-                    Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
+                    Ok(Err(e)) => Err(e),
+                    Err(join_err) => Err(join_err.to_string()),
                 }
             }
             res = async {
@@ -237,11 +270,12 @@ impl LogServer {
             } => {
                 match res {
                     Ok(Ok(())) => Ok(()),
-                    Ok(Err(e)) => Err(e.into()),
-                    Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
+                    Ok(Err(e)) => Err(e),
+                    Err(join_err) => Err(join_err.to_string()),
                 }
             }
             res = &mut writer_handle => {
+                writer_finished = true;
                 match res {
                     Ok(Ok(())) => Ok(()),
                     Ok(Err(e)) => {
@@ -253,7 +287,7 @@ impl LogServer {
                             line_str!(),
                             &format!("Fatal disk I/O failure in writer task: {e}"),
                         );
-                        Err(Box::new(e) as Box<dyn std::error::Error>)
+                        Err(e.to_string())
                     }
                     Err(join_err) => {
                         print_internal_log(
@@ -264,7 +298,7 @@ impl LogServer {
                             line_str!(),
                             &format!("Writer task panicked or was aborted: {join_err}"),
                         );
-                        Err(Box::new(join_err) as Box<dyn std::error::Error>)
+                        Err(join_err.to_string())
                     }
                 }
             }
@@ -297,28 +331,46 @@ impl LogServer {
                     line_str!(),
                     "shutdown signal received; draining buffered logs and terminating gracefully...",
                 );
-                tcp_handle.abort();
-                if let Some(ref h) = grpc_handle {
-                    h.abort();
+                Ok(())
+            }
+        };
+
+        // Unified teardown across ALL exit paths: abort ingress listeners (and their JoinSet client tasks),
+        // await task cancellation so all cloned writer_tx handles drop, clear internal logger, and drain writer.
+        tcp_handle.abort();
+        let _ = (&mut tcp_handle).await;
+        if let Some(ref mut h) = grpc_handle {
+            h.abort();
+            let _ = h.await;
+        }
+        crate::utils::terminal_ui::clear_internal_logger();
+        drop(writer_tx);
+
+        if !writer_finished {
+            match writer_handle.await {
+                Ok(Ok(())) => {
+                    print_internal_log(
+                        "INFO",
+                        &self.name,
+                        "log_server.rs",
+                        "run",
+                        line_str!(),
+                        "clean shutdown complete: all buffered records flushed to disk.",
+                    );
                 }
-                crate::utils::terminal_ui::clear_internal_logger();
-                drop(writer_tx);
-                match writer_handle.await {
-                    Ok(Ok(())) => {
-                        print_internal_log(
-                            "INFO",
-                            &self.name,
-                            "log_server.rs",
-                            "run",
-                            line_str!(),
-                            "clean shutdown complete: all buffered records flushed to disk.",
-                        );
-                        Ok(())
+                Ok(Err(e)) => {
+                    if outcome.is_ok() {
+                        return Err(Box::new(e) as Box<dyn std::error::Error>);
                     }
-                    Ok(Err(e)) => Err(Box::new(e) as Box<dyn std::error::Error>),
-                    Err(join_err) => Err(Box::new(join_err) as Box<dyn std::error::Error>),
+                }
+                Err(join_err) => {
+                    if outcome.is_ok() {
+                        return Err(Box::new(join_err) as Box<dyn std::error::Error>);
+                    }
                 }
             }
         }
+
+        outcome.map_err(|e| e.into())
     }
 }

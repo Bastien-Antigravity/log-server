@@ -83,7 +83,7 @@ mindmap
   2. `writer_task` owns the monotonic `current_sequence: u64` counter, assigning sequence IDs strictly upon dequeue.
   3. When a packet arrives, `writer_task` opportunistically drains all immediately available packets via `rx.try_recv()` up to `batch_size`.
   4. Dynamic batch size scales between 10 and 1,000 packets based on burst saturation to minimize filesystem syscalls.
-  5. A 5–100ms lull flush timer guarantees that low-traffic messages are flushed immediately without lingering in memory.
+  5. Every drained burst is flushed immediately upon `try_recv()` completion, so low-traffic messages are persisted with zero timer delay while high-traffic bursts coalesce into single syscalls.
 
 ### 5. Transactional Disk Durability (`TransactionalFileWriter`)
 * Protects against partial disk writes, power cuts, and OS write errors across 3 tiers:

@@ -20,8 +20,8 @@ A high-performance, centralized logging server written in Rust that handles both
 
 - **Dual Protocol Support**: Accepts log messages via both TCP (Cap'n Proto) and gRPC concurrently.
 - **Single-Authority FIFO Sequencing**: Sequences and batches messages authoritatively inside `LogWriter` in strict MPSC FIFO arrival order, guaranteeing identical ordering between `_main.log` and `LogRingBuffer` without synthetic sequence-gap stalls.
-- **Non-Blocking I/O**: Offloads console output to a background task to prevent ingestion stalls.
-- **Memory Optimized**: Reusable stack-based buffers for chunked network reads to minimize heap churn.
+- **Non-Blocking I/O**: Offloads console output to a background task with atomic drop-count telemetry (`get_dropped_console_logs()`) to prevent ingestion stalls.
+- **Memory Optimized**: Single-pass pre-allocated `BytesMut` frame reading without intermediate `Vec<u8>` copies and single-buffer `String` log formatting.
 - **Automatic File Rotation**: Rotates log files based on size (10MB) with configurable backup count.
 - **Append-Only Durability**: Opens log files in **Append Mode**, ensuring data is preserved across server restarts.
 - **Colorized Level Support**: Console output highlights log levels with isolated coloring and automatic ANSI reset.
@@ -37,9 +37,9 @@ For a detailed technical deep-dive, please refer to [ARCHITECTURE.md](ARCHITECTU
 
 The project is structured as follows:
 
-- **Network Layer**: High-performance ingestors for TCP (Cap'n Proto) and gRPC.
-- **Core Core**: Ordering sequencer and reorder buffer.
-- **Persistence Layer**: Ordered file writer with rotation and non-blocking console output.
+- **Network Layer**: High-performance ingestors for TCP (Cap'n Proto) and gRPC with `JoinSet`-supervised client lifecycles.
+- **Core Layer**: Protocol decoding (`hello_msg::Reader`, `logger_msg::Reader`), single-buffer formatter, and `LogRingBuffer`.
+- **Persistence Layer**: Single-authority FIFO file writer (`TransactionalFileWriter`) with rotation and non-blocking console output.
 
 ## Installation
 
@@ -73,9 +73,9 @@ The Log Bridge (Port 9021) provides a gRPC gateway for structured logging via `L
 Writer settings in `src/facade/log_writer.rs`:
 - `max_file_bytes`: 10MB default.
 - `backup_count`: 10 historical log files.
-- `gap_timeout_ms`: Periodic flush interval window (clamped 5..100ms in `writer_task`).
 - `buffer_size`: 2048 packets.
-- `initial_batch_size`: 100 packets (dynamically scaled).
+- `initial_batch_size`: 100 packets (dynamically scaled 10..1000 based on burst saturation, flushed immediately after draining each available burst).
+- `sync_on_flush`: Shared `Arc<AtomicBool>` hardware durability barrier (`fsync`), hot-reloadable via `AppConfig::on_live_conf_update`.
 
 ## Project Structure
 

@@ -9,13 +9,12 @@
 //! KEY PARAMETERS:
 //! - host / port: Socket bind address (default 0.0.0.0:9020).
 //! - writer_tx: Channel to single-authority FIFO async file writer task.
-//! - sequence_counter: Retained handle for API compatibility.
 
 use crate::models::log_packet::LogPacket;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::time::Instant;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tokio::time::{timeout, Duration};
 
 use crate::config::config::Config;
@@ -23,6 +22,14 @@ use crate::core::protocol_handlers::{handle_tcp_message, identify_client_from_ha
 use crate::line_str;
 use crate::transport::safe_socket::SafeSocket;
 use crate::utils::terminal_ui::print_internal_log;
+
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 
 /// TCP server for Cap'n Proto log messages
 pub struct TcpServer {
@@ -46,11 +53,11 @@ impl TcpServer {
 
     // -----------------------------------------------------------------------------
 
-    /// Run the TCP server
+    /// Run the TCP server, tracking all accepted client tasks in a JoinSet so
+    /// aborting or dropping `run()` cleanly aborts active client loops and releases all `writer_tx` handles.
     pub async fn run(
         &self,
         writer_tx: mpsc::Sender<LogPacket>,
-        sequence_counter: Arc<AtomicU64>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!(
             "{host}:{port}",
@@ -68,29 +75,37 @@ impl TcpServer {
             &format!("TCP server listening on {}", addr),
         );
 
+        let mut client_tasks = JoinSet::new();
+
         // Main server loop
         loop {
-            let (socket, addr) = listener.accept().await?;
-            let writer_tx = writer_tx.clone();
-            let sequence_counter = sequence_counter.clone();
-            let client_address = addr.to_string();
-            let server_name = self.config.name.clone();
+            tokio::select! {
+                accept_res = listener.accept() => {
+                    let (socket, addr) = accept_res?;
+                    let writer_tx = writer_tx.clone();
+                    let client_address = addr.to_string();
+                    let server_name = self.config.name.clone();
 
-            tokio::spawn(async move {
-                if let Err(e) =
-                    Self::handle_tcp_connection(socket, writer_tx, sequence_counter, &client_address, &server_name)
-                        .await
-                {
-                    print_internal_log(
-                        "ERROR",
-                        &server_name,
-                        "tcp_server.rs",
-                        "run",
-                        line_str!(),
-                        &format!("[client: {client_address}] connection handler failed: {e}"),
-                    );
+                    client_tasks.spawn(async move {
+                        if let Err(e) =
+                            Self::handle_tcp_connection(socket, writer_tx, &client_address, &server_name)
+                                .await
+                        {
+                            print_internal_log(
+                                "ERROR",
+                                &server_name,
+                                "tcp_server.rs",
+                                "run",
+                                line_str!(),
+                                &format!("[client: {client_address}] connection handler failed: {e}"),
+                            );
+                        }
+                    });
                 }
-            });
+                Some(_) = client_tasks.join_next(), if !client_tasks.is_empty() => {
+                    // Reap completed client tasks so JoinSet stays bounded
+                }
+            }
         }
     }
 
@@ -100,7 +115,6 @@ impl TcpServer {
     async fn handle_tcp_connection(
         socket: TcpStream,
         writer_tx: mpsc::Sender<LogPacket>,
-        sequence_counter: Arc<AtomicU64>,
         client_initial_name: &str,
         server_name: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -115,7 +129,7 @@ impl TcpServer {
         let (mut reader, mut writer) = safe_socket.split();
 
         print_internal_log(
-            "INFO",
+            "LOGON",
             server_name,
             "tcp_server.rs",
             "handle_tcp_connection",
@@ -153,7 +167,7 @@ impl TcpServer {
                 if let Ok(identity) = identify_client_from_handshake(&data) {
                     actual_client_name = identity.clone();
                     print_internal_log(
-                        "INFO",
+                        "LOGON",
                         server_name,
                         "tcp_server.rs",
                         "handle_tcp_connection",
@@ -176,14 +190,13 @@ impl TcpServer {
             return Ok(()); // Connection closed before handshake
         }
 
-        // Spawn background heartbeat task (every 10 seconds)
+        // Spawn background heartbeat task (every 10 seconds), guarded by AbortOnDrop
         let heartbeat_client_name = actual_client_name.clone();
         let heartbeat_server_name = server_name.to_string();
-        let heartbeat_handle = tokio::spawn(async move {
+        let _heartbeat_guard = AbortOnDrop(tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                 if let Err(e) = writer.send_heartbeat().await {
-                    // Only log if it's not a closed connection error
                     if e.kind() != tokio::io::ErrorKind::BrokenPipe
                         && e.kind() != tokio::io::ErrorKind::ConnectionAborted
                     {
@@ -199,7 +212,7 @@ impl TcpServer {
                     break;
                 }
             }
-        });
+        }));
 
         // 2. Main Message Loop
         // SECURITY: 60-second read timeout to prune zombie connections (FEAT-005)
@@ -232,9 +245,9 @@ impl TcpServer {
                 }
             };
 
-            if bytes_read.is_none() {
+            let Some(data) = bytes_read else {
                 print_internal_log(
-                    "INFO",
+                    "LOGOUT",
                     server_name,
                     "tcp_server.rs",
                     "handle_tcp_connection",
@@ -242,23 +255,33 @@ impl TcpServer {
                     &format!("[client: {actual_client_name}] TCP connection has been closed"),
                 );
                 break;
-            }
-
-            let data = bytes_read.unwrap().to_vec();
+            };
 
             if data.is_empty() {
                 // Heartbeat frame. Loop again to reset the read timeout.
                 continue;
             }
 
-            if let Err(e) = handle_tcp_message(
-                data,
-                writer_tx.clone(),
-                sequence_counter.clone(),
+            let start = Instant::now();
+            let frame_len = data.len() as u64;
+            let res = handle_tcp_message(&data, &writer_tx, &actual_client_name).await;
+            let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+            microservice_toolbox::wiretap::record_event(
                 &actual_client_name,
-            )
-            .await
-            {
+                server_name,
+                "SAFESOCKET",
+                "Cap'n Proto Packed",
+                "LoggerMsg",
+                "stream",
+                "inbound",
+                None,
+                frame_len,
+                latency_ms,
+                res.is_err(),
+                false,
+            );
+
+            if let Err(e) = res {
                 print_internal_log(
                     "ERROR",
                     server_name,
@@ -270,9 +293,6 @@ impl TcpServer {
                 break;
             }
         }
-
-        // Abort background heartbeat task once read loop exits to prevent task & socket leak
-        heartbeat_handle.abort();
 
         Ok(())
     }

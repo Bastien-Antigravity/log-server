@@ -13,8 +13,8 @@
 
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -71,12 +71,11 @@ impl LogBridgeGateway {
     pub async fn run(
         &self,
         writer_tx: mpsc::Sender<LogPacket>,
-        sequence_counter: Arc<AtomicU64>,
         ring_buffer: Arc<LogRingBuffer>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let raw_addr = format_bind_target(&self.config.grpc_host, self.config.grpc_port);
         let addr = resolve_grpc_bind_addr(&raw_addr).await?;
-        let service = LogBridgeServiceImpl::new(&self.config, writer_tx, sequence_counter, ring_buffer);
+        let service = LogBridgeServiceImpl::new(&self.config, writer_tx, ring_buffer);
 
         print_internal_log(
             "INFO",
@@ -143,7 +142,6 @@ pub struct LogBridgeServiceImpl {
     server_name: String,
     config: Config,
     writer_tx: mpsc::Sender<LogPacket>,
-    sequence_counter: Arc<AtomicU64>,
     ring_buffer: Arc<LogRingBuffer>,
 }
 
@@ -154,14 +152,12 @@ impl LogBridgeServiceImpl {
     pub fn new(
         config: &Config,
         writer_tx: mpsc::Sender<LogPacket>,
-        sequence_counter: Arc<AtomicU64>,
         ring_buffer: Arc<LogRingBuffer>,
     ) -> Self {
         Self {
             server_name: config.name.clone(),
             config: config.clone(),
             writer_tx,
-            sequence_counter,
             ring_buffer,
         }
     }
@@ -180,21 +176,38 @@ impl LogBridge for LogBridgeServiceImpl {
         &self,
         request: Request<ProtoLogRequest>,
     ) -> Result<Response<LogResponse>, Status> {
+        let start = Instant::now();
         let remote_addr = request.remote_addr();
         let client_id = match remote_addr {
             Some(addr) => format!("grpc_client_{}", addr),
             None => "grpc_client_unknown".to_string(),
         };
         let log_data = request.into_inner();
+        let source_svc = if log_data.service_name.is_empty() {
+            client_id.clone()
+        } else {
+            log_data.service_name.clone()
+        };
 
         let internal_request = LogEntry::from(log_data);
-        match handle_grpc_message(
-            internal_request,
-            self.writer_tx.clone(),
-            self.sequence_counter.clone(),
-        )
-        .await
-        {
+        let res = handle_grpc_message(internal_request, &self.writer_tx).await;
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+        microservice_toolbox::wiretap::record_event(
+            &source_svc,
+            &self.server_name,
+            "GRPC",
+            "Protobuf",
+            "LogBridge/LogMessage",
+            "rpc",
+            "inbound",
+            None,
+            0,
+            latency_ms,
+            res.is_err(),
+            false,
+        );
+
+        match res {
             Ok(_) => Ok(Response::new(LogResponse { success: true })),
             Err(e) => {
                 print_internal_log(

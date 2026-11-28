@@ -22,12 +22,16 @@ use crate::models::log_entry::LogEntry;
 use crate::models::log_packet::LogPacket;
 use crate::utils::helpers::{get_hostname, get_utc_timestamp};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tokio::{
-    sync::mpsc,
-    time::Duration,
-};
+use tokio::sync::mpsc;
+
+static DROPPED_CONSOLE_LOGS: AtomicU64 = AtomicU64::new(0);
+
+/// Returns total count of console messages skipped due to slow terminal backpressure
+pub fn get_dropped_console_logs() -> u64 {
+    DROPPED_CONSOLE_LOGS.load(Ordering::Relaxed)
+}
 
 /// Log writer configuration
 #[derive(Clone)]
@@ -193,10 +197,6 @@ impl LogWriter {
         let mut pending_batch: Vec<String> = Vec::with_capacity(batch_size);
         let mut pending_entries: Vec<LogEntry> = Vec::with_capacity(batch_size);
 
-        let flush_duration = Duration::from_millis(config.gap_timeout_ms.clamp(5, 100));
-        let mut flush_timer =
-            tokio::time::interval_at(tokio::time::Instant::now() + flush_duration, flush_duration);
-
         // ASYNC CONSOLE WORKER: Prevent blocking the writer task with println!
         let (console_tx, mut console_rx) = mpsc::channel::<String>(2048);
         tokio::spawn(async move {
@@ -205,73 +205,47 @@ impl LogWriter {
             }
         });
 
-        loop {
-            tokio::select! {
-                biased;
+        while let Some(first_packet) = rx.recv().await {
+            Self::_stage_packet(
+                first_packet,
+                &mut current_sequence,
+                &console_tx,
+                &mut pending_batch,
+                &mut pending_entries,
+            );
 
-                // Branch 1: Incoming structured packets in strict MPSC FIFO order
-                maybe_packet = rx.recv() => {
-                    match maybe_packet {
-                        Some(first_packet) => {
-                            Self::_stage_packet(
-                                first_packet,
-                                &mut current_sequence,
-                                &console_tx,
-                                &mut pending_batch,
-                                &mut pending_entries,
-                            );
-
-                            // Drain immediately available burst packets up to batch_size
-                            while pending_batch.len() < batch_size {
-                                match rx.try_recv() {
-                                    Ok(next_packet) => {
-                                        Self::_stage_packet(
-                                            next_packet,
-                                            &mut current_sequence,
-                                            &console_tx,
-                                            &mut pending_batch,
-                                            &mut pending_entries,
-                                        );
-                                    }
-                                    Err(_) => break,
-                                }
-                            }
-
-                            let drained_count = pending_batch.len();
-                            Self::_flush_pending_batch(
-                                &mut sink,
-                                &mut pending_batch,
-                                &mut pending_entries,
-                                &config,
-                                &ring_buffer,
-                            )
-                            .await?;
-
-                            // Dynamically scale batch size based on burst saturation
-                            if drained_count >= batch_size {
-                                batch_size = (batch_size * 2).min(1000);
-                            } else if drained_count < batch_size / 2 {
-                                let min_batch = config.initial_batch_size.clamp(1, 10);
-                                batch_size = (batch_size / 2).max(min_batch);
-                            }
-                        }
-                        None => break,
-                    }
-                }
-
-                // Branch 2: Periodic flush timer
-                _ = flush_timer.tick() => {
-                    if !pending_batch.is_empty() {
-                        Self::_flush_pending_batch(
-                            &mut sink,
+            // Drain immediately available burst packets up to batch_size
+            while pending_batch.len() < batch_size {
+                match rx.try_recv() {
+                    Ok(next_packet) => {
+                        Self::_stage_packet(
+                            next_packet,
+                            &mut current_sequence,
+                            &console_tx,
                             &mut pending_batch,
                             &mut pending_entries,
-                            &config,
-                            &ring_buffer,
-                        )
-                        .await?;
+                        );
                     }
+                    Err(_) => break,
                 }
+            }
+
+            let drained_count = pending_batch.len();
+            Self::_flush_pending_batch(
+                &mut sink,
+                &mut pending_batch,
+                &mut pending_entries,
+                &config,
+                &ring_buffer,
+            )
+            .await?;
+
+            // Dynamically scale batch size based on burst saturation
+            if drained_count >= batch_size {
+                batch_size = (batch_size * 2).min(1000);
+            } else if drained_count < batch_size / 2 {
+                let min_batch = config.initial_batch_size.clamp(1, 10);
+                batch_size = (batch_size / 2).max(min_batch);
             }
         }
 
@@ -312,26 +286,32 @@ impl LogWriter {
             .get(entry.level as usize)
             .unwrap_or(&"UNKNOWN");
 
-        let console_msg = format_log_message(
-            &entry.timestamp,
-            &entry.hostname,
-            &entry.logger_name,
-            level_str,
-            &entry.module,
-            &entry.filename,
-            &entry.function_name,
-            &entry.line_number,
-            &entry.message,
-            &entry.path_name,
-            &entry.process_id,
-            &entry.process_name,
-            &entry.thread_id,
-            &entry.thread_name,
-            &entry.service_name,
-            &entry.stack_trace,
-            true,
-        );
-        let _ = console_tx.try_send(console_msg);
+        if console_tx.capacity() > 0 {
+            let console_msg = format_log_message(
+                &entry.timestamp,
+                &entry.hostname,
+                &entry.logger_name,
+                level_str,
+                &entry.module,
+                &entry.filename,
+                &entry.function_name,
+                &entry.line_number,
+                &entry.message,
+                &entry.path_name,
+                &entry.process_id,
+                &entry.process_name,
+                &entry.thread_id,
+                &entry.thread_name,
+                &entry.service_name,
+                &entry.stack_trace,
+                true,
+            );
+            if console_tx.try_send(console_msg).is_err() {
+                DROPPED_CONSOLE_LOGS.fetch_add(1, Ordering::Relaxed);
+            }
+        } else {
+            DROPPED_CONSOLE_LOGS.fetch_add(1, Ordering::Relaxed);
+        }
 
         let file_msg = format_log_message(
             &entry.timestamp,

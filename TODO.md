@@ -14,12 +14,12 @@ tags:
 ## 🎯 Active Architectural Tasks
 
 ### 🔴 High Priority
-- [ ] **Dedicated Cap'n Proto Handshake Schema**: Replace the `@0:fromName` / `@1:fromHost` field layout aliasing in `protocol_handlers.rs` with a dedicated `HelloMsg` Cap'n Proto schema reader.
+- [x] **Dedicated Cap'n Proto Handshake Schema**: Replaced the `@0:fromName` / `@1:fromHost` field layout aliasing in `protocol_handlers.rs` with a dedicated `hello_msg::Reader` Cap'n Proto struct reader.
   - *Affected area*: `src/core/protocol_handlers.rs`.
 
 ### 🟠 Medium Priority
-- [ ] **`microservice-toolbox` Config & SafeSocket Convergence**: Evaluate delegating low-level framing and transport to `microservice-toolbox::transport::SafeSocket` (or shared Rust SDK equivalent) to guarantee cross-language protocol parity, and wire `AppConfig::on_live_conf_update` directly to `Config::set_sync_on_flush` for distributed fleet-wide live configuration reloads.
-  - *Affected area*: `src/transport/safe_socket.rs`, `src/config/config.rs`, `src/facade/log_server.rs`.
+- [x] **`microservice-toolbox` Live Config & WireTap Convergence**: Wired `AppConfig::on_live_conf_update` directly to `Config::sync_on_flush` for distributed fleet-wide live configuration reloads, and integrated `microservice_toolbox::wiretap` across `LogServer`, `TcpServer`, and `LogBridgeServiceImpl`.
+  - *Affected area*: `src/facade/log_server.rs`, `src/servers/tcp_server.rs`, `src/servers/grpc_server.rs`.
 
 ---
 
@@ -95,16 +95,4 @@ The following end-to-end integration and resilience test scenarios are targeted 
 - [x] **Hardened SafeSocket Framing**: 4-byte BE length framing, 10MB limits, 5s Slow-Loris guard, 60s zombie pruning, and keepalive heartbeat handling (`src/transport/safe_socket.rs`).
 - [x] **OpenMFE Exchange Contracts**: Compile-time embedded `.proto` and `.capnp` schemas served via `GetExchangeContracts` and registered with `web-interface` (`src/core/contracts.rs`).
 - [x] **Strict Clippy Compliance**: Zero compiler warnings across all targets (`cargo clippy --all-targets -- -D warnings`).
-
-
----
-
-## 🏛️ Completed Architecture Milestones (Traceability)
-
-- [x] **Single-Authority FIFO Sequencing**: Monotonic sequence assignment upon dequeue, greedy burst draining (`rx.try_recv()`), and identical disk-to-ring commit order (`src/facade/log_writer.rs`).
-- [x] **Transactional Disk Persistence & Checkpoint Rollback**: Tier 1 in-memory staging, Tier 2 `ftruncate` rollback on partial writes, and Tier 3 handle recovery (`src/core/transactional_writer.rs`).
-- [x] **Fail-Fast Lifecycle Integration**: `writer_handle` supervised in `tokio::select!`, `[DISK_FAILURE]` `CRITICAL` pushed to `LogRingBuffer`, and non-zero exit code 1 (`src/facade/log_server.rs`).
-- [x] **In-Memory Ring Buffer & gRPC StreamLogs Bridge**: 5,000-slot `LogRingBuffer` and HTTP/2 `StreamLogs` consumed by `web-interface` (`src/core/ring_buffer.rs`, `src/servers/grpc_server.rs`).
-- [x] **Hardened SafeSocket Framing**: 4-byte BE length framing, 10MB limits, 5s Slow-Loris guard, 60s zombie pruning, and keepalive heartbeat handling (`src/transport/safe_socket.rs`).
-- [x] **OpenMFE Exchange Contracts**: Compile-time embedded `.proto` and `.capnp` schemas served via `GetExchangeContracts` and registered with `web-interface` (`src/core/contracts.rs`).
-- [x] **Strict Clippy Compliance**: Zero compiler warnings across all targets (`cargo clippy --all-targets -- -D warnings`).
+- [x] **Unified Shutdown Coordinator & `JoinSet` Client Drain**: All termination paths in `LogServer::run` abort active `JoinSet` client tasks, clear `INTERNAL_SENDER`, drop all `writer_tx` clones, and await final `LogWriter` disk flush.

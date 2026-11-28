@@ -48,8 +48,9 @@ The server supports two concurrent protocols for log ingestion:
 
 ### 2. Networking (`SafeSocket`)
 The low-level transport uses a custom wrapper around Tokio's `TcpStream`.
-- **Memory Optimization**: Uses a reusable stack-based buffer for chunked reading to eliminate heap churn during high-volume ingestion.
+- **Memory Optimization**: Reads frame payloads directly into an exact-sized `BytesMut` buffer without intermediate `Vec<u8>` copies, distinguishing clean 0-byte EOF disconnects from truncated 1..3-byte headers.
 - **Frame Validation**: Enforces a `MAX_MESSAGE_SIZE` (10MB) and Big-Endian length prefix validation to prevent OOM attacks.
+- **Supervised Client Lifecycle**: `TcpServer::run` tracks all spawned client handlers in a `tokio::task::JoinSet` (and guards per-connection heartbeats via `AbortOnDrop`), ensuring that unified teardown in `LogServer::run` immediately aborts active connections and drops all `writer_tx` handles so `LogWriter` drains cleanly on any exit path.
 
 ### 3. Log Writer Task (Single-Authority FIFO Sequencing)
 The central orchestrator of the persistence and sequencing layer.

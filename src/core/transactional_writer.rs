@@ -196,7 +196,7 @@ impl TransactionalFileWriter {
             return Ok(false);
         }
 
-        self.file.flush().await?;
+        self.flush().await?;
         Self::rotate_files(&self.base_file_path, backup_count).await?;
 
         // Open fresh file after rotation
@@ -206,6 +206,15 @@ impl TransactionalFileWriter {
             .open(&self.base_file_path)
             .await?;
         self.file_size = 0;
+
+        #[cfg(unix)]
+        if self.sync_on_flush.load(Ordering::Relaxed) {
+            if let Some(parent) = self.base_file_path.parent() {
+                if let Ok(dir) = File::open(parent).await {
+                    let _ = dir.sync_all().await;
+                }
+            }
+        }
 
         Ok(true)
     }

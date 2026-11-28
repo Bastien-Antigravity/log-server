@@ -12,8 +12,9 @@
 //! - Fixed-width column padding for timestamp, host, logger, level, file, func, line.
 
 use crate::utils::helpers::truncate;
+use std::fmt::Write;
 
-/// Unified log message formatting - used by both protocols
+/// Unified log message formatting - single-buffer allocation path used by both protocols
 #[allow(clippy::too_many_arguments)]
 pub fn format_log_message(
     timestamp: &str,
@@ -34,60 +35,74 @@ pub fn format_log_message(
     stack_trace: &str,
     use_color: bool,
 ) -> String {
-    let display_level = if use_color {
-        crate::utils::terminal_ui::colorize_level(level)
-    } else {
-        format!("{:<10}", truncate(level, 10))
-    };
+    let mut out = String::with_capacity(160 + message.len() + stack_trace.len());
 
     // 1. Basic 8 columns (Fixed width)
-    // Note: display_level already contains padding and ANSI codes if use_color is true
-    let base = format!(
-        "{:<33} {:<12} {:<22} {} {:<20} {:<25} {:<6} {}",
+    let _ = write!(
+        out,
+        "{:<33} {:<12} {:<22} ",
         timestamp,
         truncate(hostname, 12),
         truncate(logger_name, 22),
-        display_level,
+    );
+    if use_color {
+        out.push_str(&crate::utils::terminal_ui::colorize_level(level));
+    } else {
+        let _ = write!(out, "{:<10}", truncate(level, 10));
+    }
+    let _ = write!(
+        out,
+        " {:<20} {:<25} {:<6} {}",
         truncate(filename, 20),
         truncate(function_name, 25),
         truncate(line_number, 6),
         message
     );
 
-    // 2. Extra metadata (key=value)
-    let mut meta = Vec::new();
-    if !module.is_empty() {
-        meta.push(format!("mod={module}"));
-    }
-    if !path_name.is_empty() {
-        meta.push(format!("path={path_name}"));
-    }
-    if !process_id.is_empty() {
-        meta.push(format!("pid={process_id}"));
-    }
-    if !process_name.is_empty() {
-        meta.push(format!("pname={process_name}"));
-    }
-    if !thread_id.is_empty() {
-        meta.push(format!("tid={thread_id}"));
-    }
-    if !thread_name.is_empty() {
-        meta.push(format!("tname={thread_name}"));
-    }
-    if !service_name.is_empty() {
-        meta.push(format!("svc={service_name}"));
-    }
+    // 2. Extra metadata (key=value) written directly into `out` without intermediate Vec<String>
+    let mut has_meta = false;
+    let mut append_meta = |key: &str, val: &str| {
+        if !val.is_empty() {
+            if !has_meta {
+                out.push_str(" [metadata: ");
+                has_meta = true;
+            } else {
+                out.push(' ');
+            }
+            out.push_str(key);
+            out.push('=');
+            out.push_str(val);
+        }
+    };
 
-    // Stack trace handling: append it last
+    append_meta("mod", module);
+    append_meta("path", path_name);
+    append_meta("pid", process_id);
+    append_meta("pname", process_name);
+    append_meta("tid", thread_id);
+    append_meta("tname", thread_name);
+    append_meta("svc", service_name);
+
     if !stack_trace.is_empty() {
-        meta.push(format!("stack={}", stack_trace.replace('\n', " | ")));
+        if !has_meta {
+            out.push_str(" [metadata: stack=");
+            has_meta = true;
+        } else {
+            out.push_str(" stack=");
+        }
+        for (i, line) in stack_trace.split('\n').enumerate() {
+            if i > 0 {
+                out.push_str(" | ");
+            }
+            out.push_str(line);
+        }
     }
 
-    if meta.is_empty() {
-        base
-    } else {
-        format!("{base} [metadata: {meta}]", meta = meta.join(" "))
+    if has_meta {
+        out.push(']');
     }
+
+    out
 }
 
 #[cfg(test)]

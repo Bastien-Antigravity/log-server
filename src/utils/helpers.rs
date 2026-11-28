@@ -28,10 +28,22 @@ macro_rules! line_str {
 
 // -----------------------------------------------------------------------------
 
-/// Get system hostname (cached)
+/// Get system hostname (cached without redundant subprocess spawns when env or /etc/hostname is available)
 pub fn get_hostname() -> &'static str {
     static HOSTNAME: OnceLock<String> = OnceLock::new();
     HOSTNAME.get_or_init(|| {
+        if let Ok(h) = std::env::var("HOSTNAME").or_else(|_| std::env::var("COMPUTERNAME")) {
+            let trimmed = h.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
+        if let Ok(h) = std::fs::read_to_string("/etc/hostname") {
+            let trimmed = h.trim();
+            if !trimmed.is_empty() {
+                return trimmed.to_string();
+            }
+        }
         Command::new("hostname")
             .output()
             .ok()
@@ -42,6 +54,7 @@ pub fn get_hostname() -> &'static str {
                     None
                 }
             })
+            .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "localhost".to_string())
     })
 }

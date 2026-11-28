@@ -175,7 +175,7 @@ fn parse_host_port(addr: &str) -> Result<Endpoint, String> {
 fn resolve_config_profile() -> String {
     if let Ok(profile) = std::env::var("CONFIG_PROFILE") {
         let trimmed = profile.trim();
-        if !trimmed.is_empty() && config_file_exists(&format!("{trimmed}.yaml")) {
+        if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
@@ -184,32 +184,11 @@ fn resolve_config_profile() -> String {
         .map(|v| v == "true")
         .unwrap_or(false);
 
-    if in_docker
-        && (config_file_exists("production.yaml") || !config_file_exists("standalone.yaml"))
-    {
+    if in_docker {
         return "production".to_string();
     }
 
     "standalone".to_string()
-}
-
-//-----------------------------------------------------------------------------------------------
-
-/// Checks whether a profile configuration file exists in standard lookup locations.
-fn config_file_exists(filename: &str) -> bool {
-    if std::path::Path::new(filename).exists()
-        || std::path::Path::new("config").join(filename).exists()
-    {
-        return true;
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            return dir.join(filename).exists() || dir.join("config").join(filename).exists();
-        }
-    }
-
-    false
 }
 
 //-----------------------------------------------------------------------------------------------
